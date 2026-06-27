@@ -1,8 +1,10 @@
 import sqlite3
+# pyrefly: ignore [missing-import]
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import pandas as pd
 import traceback
+import re
 
 DB_FILE = "inventory.db"
 
@@ -64,20 +66,196 @@ class DatabaseHelper:
             c.execute("ALTER TABLE components ADD COLUMN tolerance TEXT")
         if "component_type" not in existing_columns:
             c.execute("ALTER TABLE components ADD COLUMN component_type TEXT")
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                logic_type TEXT NOT NULL,
+                fields_json TEXT DEFAULT '[]'
+            )
+        ''')
+        
+        c.execute("PRAGMA table_info(categories)")
+        existing_cat_cols = [col[1] for col in c.fetchall()]
+        if "fields_json" not in existing_cat_cols:
+            c.execute("ALTER TABLE categories ADD COLUMN fields_json TEXT DEFAULT '[]'")
+            
+        c.execute("SELECT count(*) FROM categories")
+        if c.fetchone()[0] == 0:
+            for cat in CATEGORIES:
+                c.execute("INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)", (cat, cat, '[]'))
             
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def get_categories():
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT name, logic_type, fields_json FROM categories ORDER BY id")
+        rows = c.fetchall()
+        conn.close()
+        return rows
 
     @staticmethod
     def get_connection():
         return sqlite3.connect(DB_FILE)
 
 
+class SMDDecoder:
+    EIA96_MULTIPLIERS = {
+        'Z': 0.001, 'Y': 0.01, 'R': 0.01, 'X': 0.1, 'S': 0.1, 
+        'A': 1, 'B': 10, 'C': 100, 'D': 1000, 'E': 10000, 'F': 100000
+    }
+    
+    EIA96_VALUES = [
+        100, 102, 105, 107, 110, 113, 115, 118, 121, 124, 127, 130, 133, 137, 140, 143, 147, 150, 
+        154, 158, 162, 165, 169, 174, 178, 182, 187, 191, 196, 200, 205, 210, 215, 221, 226, 232, 
+        237, 243, 249, 255, 261, 267, 274, 280, 287, 294, 301, 309, 316, 324, 332, 340, 348, 357, 
+        365, 374, 383, 392, 402, 412, 422, 432, 442, 453, 464, 475, 487, 499, 511, 523, 536, 549, 
+        562, 576, 590, 604, 619, 634, 649, 665, 681, 698, 715, 732, 750, 768, 787, 806, 825, 845, 
+        866, 887, 909, 931, 953, 976
+    ]
+
+    CAP_VOLTAGE_CODES = {
+        'e': 2.5, 'G': 4, 'J': 6.3, 'A': 10, 'C': 16, 'D': 20, 'E': 25, 'V': 35, 'H': 50, 'T': 63, 'x': 63
+    }
+    
+    @staticmethod
+    def decode_resistor_smd(code):
+        code = code.strip().upper()
+        
+        if 'R' in code:
+            try:
+                val = float(code.replace('R', '.'))
+                return val, None
+            except ValueError:
+                pass
+                
+        match_eia96 = re.match(r'^(\d{2})([A-Z])$', code)
+        if match_eia96:
+            code_num = int(match_eia96.group(1))
+            multiplier = match_eia96.group(2)
+            if 1 <= code_num <= 96 and multiplier in SMDDecoder.EIA96_MULTIPLIERS:
+                val = SMDDecoder.EIA96_VALUES[code_num - 1] * SMDDecoder.EIA96_MULTIPLIERS[multiplier]
+                return float(val), "1%"
+                
+        match_digits = re.match(r'^(\d+)(\d)$', code)
+        if match_digits:
+            base = int(match_digits.group(1))
+            mult = int(match_digits.group(2))
+            val = base * (10 ** mult)
+            tol = "5%" if len(code) == 3 else "1%"
+            return float(val), tol
+            
+        return None, None
+
+    @staticmethod
+    def decode_capacitor_smd(code):
+        code = code.strip()
+        
+        match_explicit = re.search(r'^([\d\.]+)\s*(uF|u|nF|n|pF|p|mF|m)?\s*[\s,]*(\d+)\s*V$', code, re.IGNORECASE)
+        if match_explicit:
+            val = float(match_explicit.group(1))
+            unit = (match_explicit.group(2) or "").lower()
+            voltage = f"{match_explicit.group(3)}V"
+            
+            if 'p' in unit: val *= 1e-12
+            elif 'n' in unit: val *= 1e-9
+            elif 'm' in unit: val *= 1e-3
+            else: val *= 1e-6
+                
+            return val, voltage
+            
+        match_letter = re.match(r'^([a-zA-Z])(\d{2})(\d)$', code)
+        if match_letter:
+            letter = match_letter.group(1)
+            if letter not in SMDDecoder.CAP_VOLTAGE_CODES:
+                letter = letter.upper()
+                
+            voltage = None
+            if letter in SMDDecoder.CAP_VOLTAGE_CODES:
+                voltage = f"{SMDDecoder.CAP_VOLTAGE_CODES[letter]}V"
+                
+            base = int(match_letter.group(2))
+            mult = int(match_letter.group(3))
+            
+            val_pf = base * (10 ** mult)
+            val = val_pf * 1e-12
+            return val, voltage
+
+        match_3digit = re.match(r'^(\d{2})(\d)$', code)
+        if match_3digit:
+            base = int(match_3digit.group(1))
+            mult = int(match_3digit.group(2))
+            val_pf = base * (10 ** mult)
+            val = val_pf * 1e-12
+            return val, None
+            
+        return None, None
+        
+    @staticmethod
+    def parse_search_query(query):
+        """Converts human readable '10k', '100n' into numeric values."""
+        query = query.strip().replace(',', '.')
+        
+        if 'R' in query.upper() and not re.search(r'[a-qs-zA-QS-Z]', query):
+            try:
+                return float(query.upper().replace('R', '.'))
+            except:
+                pass
+                
+        match = re.match(r'^([\d\.]+)\s*(p|n|u|m|M|k|K|G)?([fF]|ohms|ohm|Ohm|R)?$', query)
+        if match:
+            try:
+                val = float(match.group(1))
+                mult = match.group(2)
+                
+                if mult == 'p': val *= 1e-12
+                elif mult == 'n': val *= 1e-9
+                elif mult in ('u', 'U'): val *= 1e-6
+                elif mult == 'm': val *= 1e-3
+                elif mult in ('k', 'K'): val *= 1e3
+                elif mult == 'M': val *= 1e6
+                elif mult == 'G': val *= 1e9
+                
+                return val
+            except ValueError:
+                pass
+                
+        return None
+
+
+    @staticmethod
+    def format_resistance(val):
+        if val is None or pd.isna(val) or val == "": return ""
+        val = float(val)
+        if val >= 1e6: return f"{val/1e6:g}MΩ"
+        if val >= 1e3: return f"{val/1e3:g}kΩ"
+        return f"{val:g}Ω"
+
+    @staticmethod
+    def format_capacitance(val):
+        if val is None or pd.isna(val) or val == "": return ""
+        val = float(val)
+        if val >= 1e-3: return f"{val/1e-3:g}mF"
+        if val >= 1e-6: return f"{val/1e-6:g}µF"
+        if val >= 1e-9: return f"{val/1e-9:g}nF"
+        return f"{val/1e-12:g}pF"
+
 class CategoryUIBuilder:
     """Shared class to build exactly identical UI components for both Registration and Search"""
     
     @staticmethod
-    def build_fields(parent_frame, category, is_search=False):
+    def build_fields(parent_frame, category_config, is_search=False):
+        category = category_config.get('logic_type', 'Outros')
+        fields_json = category_config.get('fields', '[]')
+        try:
+            custom_fields = json.loads(fields_json)
+        except:
+            custom_fields = []
+            
         # Clear frame
         for widget in parent_frame.winfo_children():
             widget.destroy()
@@ -85,9 +263,12 @@ class CategoryUIBuilder:
         inputs = {}
         
         # Helper to add simple text entry
-        def add_entry(row, col, label_text, key):
+        def add_entry(row, col, label_text, key, placeholder=None):
             ctk.CTkLabel(parent_frame, text=label_text).grid(row=row, column=col*2, padx=(10, 5), pady=10, sticky="e")
-            entry = ctk.CTkEntry(parent_frame, width=150)
+            if placeholder:
+                entry = ctk.CTkEntry(parent_frame, width=150, placeholder_text=placeholder)
+            else:
+                entry = ctk.CTkEntry(parent_frame, width=150)
             entry.grid(row=row, column=col*2+1, padx=(0, 15), pady=10, sticky="w")
             inputs[key] = entry
             
@@ -173,12 +354,17 @@ class CategoryUIBuilder:
             toggle_method()
             
         elif category == "Resistor SMD":
-            add_entry(0, 0, "Valor (ex: 2k2):", "raw_value")
+            add_entry(0, 0, "Código SMD:", "raw_value", placeholder="(ex: 103, 4702, 01C, 4R7)")
             add_entry(0, 1, "Tolerância (ex: 1%):", "tolerance")
             add_entry(0, 2, "Encapsulamento (ex: 0805):", "component_type")
             
-        elif category in ["Capacitor PTH", "Capacitor SMD"]:
+        elif category == "Capacitor PTH":
             add_entry(0, 0, "Capacitância (ex: 100nF):", "raw_value")
+            add_entry(0, 1, "Tensão Máx (ex: 50V):", "voltage")
+            add_entry(0, 2, "Encapsulamento/Tipo:", "component_type")
+            
+        elif category == "Capacitor SMD":
+            add_entry(0, 0, "Código SMD:", "raw_value", placeholder="(ex: 104, 226, 47 16V)")
             add_entry(0, 1, "Tensão Máx (ex: 50V):", "voltage")
             add_entry(0, 2, "Encapsulamento/Tipo:", "component_type")
             
@@ -220,7 +406,14 @@ class CategoryUIBuilder:
         return inputs
         
     @staticmethod
-    def extract_values(category, inputs):
+    def extract_values(category_config, inputs):
+        category = category_config.get('logic_type', 'Outros')
+        fields_json = category_config.get('fields', '[]')
+        try:
+            custom_fields = json.loads(fields_json)
+        except:
+            custom_fields = []
+
         """Extract standardized DB values from the dynamic UI widgets"""
         raw_val = ""
         voltage = ""
@@ -263,6 +456,226 @@ class CategoryUIBuilder:
             
         return raw_val, voltage, tolerance, comp_type
 
+
+
+
+class CategoryEditorDialog(ctk.CTkToplevel):
+    def __init__(self, master, title="Adicionar Categoria", initial_name="", initial_fields=None):
+        super().__init__(master)
+        self.title(title)
+        self.geometry("400x500")
+        self.result = (None, None)
+        self.grab_set()
+        
+        self.name_label = ctk.CTkLabel(self, text="Nome da Categoria:")
+        self.name_label.pack(pady=(10, 0))
+        self.name_entry = ctk.CTkEntry(self, width=300)
+        self.name_entry.pack(pady=5)
+        if initial_name:
+            self.name_entry.insert(0, initial_name)
+        
+        self.fields_label = ctk.CTkLabel(self, text="Campos Personalizados:")
+        self.fields_label.pack(pady=(15, 0))
+        
+        self.fields_frame = ctk.CTkScrollableFrame(self, width=350, height=250)
+        self.fields_frame.pack(pady=5, fill="both", expand=True)
+        
+        self.fields_entries = []
+        
+        if initial_fields:
+            for field in initial_fields:
+                self.add_field(field)
+        
+        self.add_btn = ctk.CTkButton(self, text="+ Adicionar Campo", command=self.add_field)
+        self.add_btn.pack(pady=5)
+        
+        self.save_btn = ctk.CTkButton(self, text="Salvar", command=self.save)
+        self.save_btn.pack(pady=15)
+        
+    def add_field(self, initial_value=""):
+        row_frame = ctk.CTkFrame(self.fields_frame, fg_color="transparent")
+        row_frame.pack(fill="x", pady=2)
+        entry = ctk.CTkEntry(row_frame, width=250, placeholder_text="Nome do Campo")
+        entry.pack(side="left", padx=5)
+        if initial_value:
+            entry.insert(0, initial_value)
+        del_btn = ctk.CTkButton(row_frame, text="X", width=30, fg_color="red", command=lambda f=row_frame, e=entry: self.remove_field(f, e))
+        del_btn.pack(side="left")
+        self.fields_entries.append(entry)
+        
+    def remove_field(self, frame, entry):
+        frame.destroy()
+        if entry in self.fields_entries:
+            self.fields_entries.remove(entry)
+            
+    def save(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            import tkinter.messagebox as messagebox
+            messagebox.showwarning("Aviso", "Nome da categoria é obrigatório.")
+            return
+        fields = [e.get().strip() for e in self.fields_entries if e.get().strip()]
+        import json
+        self.result = (name, json.dumps(fields))
+        self.destroy()
+
+    def get_result(self):
+        self.wait_window()
+        return self.result
+
+class CategoryManagerWindow(ctk.CTkToplevel):
+    def __init__(self, master, on_close_callback):
+        super().__init__(master)
+        self.title("Gerenciar Categorias")
+        self.geometry("400x500")
+        self.on_close_callback = on_close_callback
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        self.label = ctk.CTkLabel(self, text="Gerenciar Categorias", font=ctk.CTkFont(size=20, weight="bold"))
+        self.label.pack(pady=10)
+        
+        self.listbox_frame = ctk.CTkScrollableFrame(self)
+        self.listbox_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.btn_frame.pack(fill="x", padx=20, pady=10)
+        
+        self.add_btn = ctk.CTkButton(self.btn_frame, text="Adicionar", command=self.add_category)
+        self.add_btn.pack(side="left", expand=True, padx=5)
+        
+        self.edit_btn = ctk.CTkButton(self.btn_frame, text="Editar", command=self.edit_category)
+        self.edit_btn.pack(side="left", expand=True, padx=5)
+        
+        self.del_btn = ctk.CTkButton(self.btn_frame, text="Excluir", command=self.delete_category)
+        self.del_btn.pack(side="left", expand=True, padx=5)
+        
+        self.selected_category = ctk.StringVar(value="")
+        self.refresh_list()
+
+    def refresh_list(self):
+        for widget in self.listbox_frame.winfo_children():
+            widget.destroy()
+            
+        import sqlite3
+        from tkinter import messagebox
+        categories = DatabaseHelper.get_categories()
+        for cat in categories:
+            name = cat[0]
+            rb = ctk.CTkRadioButton(self.listbox_frame, text=name, variable=self.selected_category, value=name)
+            rb.pack(anchor="w", pady=5)
+
+    def add_category(self):
+        dialog = CategoryEditorDialog(self, title="Adicionar Categoria")
+        name, fields_json = dialog.get_result()
+        if not name: return
+        
+        name = name.strip()
+        if name:
+            import sqlite3
+            from tkinter import messagebox
+            try:
+                conn = DatabaseHelper.get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)", (name, "Outros", fields_json))
+                conn.commit()
+                self.refresh_list()
+                self.on_close_callback()
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Erro", "Esta categoria já existe.")
+            finally:
+                conn.close()
+
+    def edit_category(self):
+        old_name = self.selected_category.get()
+        if not old_name:
+            import tkinter.messagebox as messagebox
+            messagebox.showwarning("Aviso", "Selecione uma categoria para editar.")
+            return
+            
+        import sqlite3
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT logic_type, fields_json FROM categories WHERE name = ?", (old_name,))
+        row = c.fetchone()
+        conn.close()
+        
+        if row and row[0] != "Outros":
+            # Standard category: Only allow rename
+            dialog = ctk.CTkInputDialog(text=f"Novo nome para '{old_name}' (Campos são fixos para categorias base):", title="Renomear Categoria")
+            new_name = dialog.get_input()
+            if not new_name: return
+            new_name = new_name.strip()
+            fields_json = row[1]
+        else:
+            # Custom category: allow full edit
+            import json
+            initial_fields = []
+            if row and row[1]:
+                try:
+                    initial_fields = json.loads(row[1])
+                except:
+                    pass
+            dialog = CategoryEditorDialog(self, title="Editar Categoria", initial_name=old_name, initial_fields=initial_fields)
+            new_name, fields_json = dialog.get_result()
+            if not new_name: return
+            new_name = new_name.strip()
+            
+        if new_name and new_name != old_name:
+            import sqlite3
+            from tkinter import messagebox
+            conn = DatabaseHelper.get_connection()
+            c = conn.cursor()
+            try:
+                c.execute("UPDATE categories SET name = ?, fields_json = ? WHERE name = ?", (new_name, fields_json, old_name))
+                c.execute("UPDATE components SET category = ? WHERE category = ?", (new_name, old_name))
+                conn.commit()
+                self.selected_category.set(new_name)
+                self.refresh_list()
+                self.on_close_callback()
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Erro", "Já existe uma categoria com este nome.")
+            finally:
+                conn.close()
+        elif new_name == old_name:
+            # Maybe just fields changed
+            import sqlite3
+            conn = DatabaseHelper.get_connection()
+            c = conn.cursor()
+            c.execute("UPDATE categories SET fields_json = ? WHERE name = ?", (fields_json, old_name))
+            conn.commit()
+            conn.close()
+            self.on_close_callback()
+
+    def delete_category(self):
+        name = self.selected_category.get()
+        if not name:
+            import tkinter.messagebox as messagebox
+            messagebox.showwarning("Aviso", "Selecione uma categoria para excluir.")
+            return
+            
+        import sqlite3
+        from tkinter import messagebox
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT count(*) FROM components WHERE category = ?", (name,))
+        count = c.fetchone()[0]
+        
+        if count > 0:
+            messagebox.showerror("Erro", f"Não é possível excluir '{name}' pois existem {count} componentes usando esta categoria. Remova-os ou edite suas categorias primeiro.")
+            conn.close()
+            return
+            
+        if messagebox.askyesno("Confirmar", f"Tem certeza que deseja excluir a categoria '{name}'?"):
+            c.execute("DELETE FROM categories WHERE name = ?", (name,))
+            conn.commit()
+            self.selected_category.set("")
+            self.refresh_list()
+            self.on_close_callback()
+        conn.close()
+
+    def on_close(self):
+        self.on_close_callback()
+        self.destroy()
 
 class DrawerRegistrationFrame(ctk.CTkFrame):
     def __init__(self, master):
@@ -358,8 +771,9 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.cat_label = ctk.CTkLabel(self.container, text="Categoria:")
         self.cat_label.grid(row=4, column=0, padx=20, pady=10, sticky="w")
         
-        self.cat_var = ctk.StringVar(value=CATEGORIES[0])
-        self.cat_menu = ctk.CTkOptionMenu(self.container, variable=self.cat_var, values=CATEGORIES, command=self.on_category_change)
+        self.cat_logic_map = {}
+        self.cat_var = ctk.StringVar(value="")
+        self.cat_menu = ctk.CTkOptionMenu(self.container, variable=self.cat_var, values=[], command=self.on_category_change)
         self.cat_menu.grid(row=4, column=1, padx=20, pady=10, sticky="w")
         
         # Dynamic Frame Container
@@ -367,11 +781,26 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.dynamic_frame.grid(row=5, column=0, columnspan=2, padx=20, pady=20, sticky="nsew")
         
         self.dynamic_inputs = {}
+        self.update_categories()
         
         self.submit_btn = ctk.CTkButton(self, text="Salvar Componente", command=self.save_component, height=40)
         self.submit_btn.grid(row=2, column=0, columnspan=2, pady=20, padx=20, sticky="w")
 
         self.on_category_change(self.cat_var.get())
+
+
+    def update_categories(self):
+        rows = DatabaseHelper.get_categories()
+        self.cat_logic_map = {row[0]: {'logic_type': row[1], 'fields': row[2]} for row in rows}
+        cat_names = list(self.cat_logic_map.keys())
+        if cat_names:
+            self.cat_menu.configure(values=cat_names)
+            if self.cat_var.get() not in cat_names:
+                self.cat_var.set(cat_names[0])
+            self.on_category_change(self.cat_var.get())
+        else:
+            self.cat_menu.configure(values=["-"])
+            self.cat_var.set("-")
 
     def update_drawers(self):
         conn = DatabaseHelper.get_connection()
@@ -433,7 +862,8 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.slot_var.set("Sem divisões")
 
     def on_category_change(self, category):
-        self.dynamic_inputs = CategoryUIBuilder.build_fields(self.dynamic_frame, category, is_search=False)
+        cat_config = getattr(self, 'cat_logic_map', {}).get(category, {'logic_type': 'Outros', 'fields': '[]'})
+        self.dynamic_inputs = CategoryUIBuilder.build_fields(self.dynamic_frame, cat_config, is_search=False)
 
     def save_component(self):
         name = self.name_entry.get().strip()
@@ -457,7 +887,24 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         subdivision_id = slot_info["subdivision_id"]
         old_comp_id = slot_info["comp_id"]
         
-        raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(category, self.dynamic_inputs)
+        cat_config = getattr(self, 'cat_logic_map', {}).get(category, {'logic_type': 'Outros', 'fields': '[]'})
+        raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(cat_config, self.dynamic_inputs)
+        
+        normalized_val = None
+        
+        if logic_type == "Resistor SMD" and raw_val:
+            val, tol = SMDDecoder.decode_resistor_smd(raw_val)
+            if val is not None:
+                normalized_val = val
+            if tol and not tolerance:
+                tolerance = tol
+                
+        elif logic_type == "Capacitor SMD" and raw_val:
+            val, volt = SMDDecoder.decode_capacitor_smd(raw_val)
+            if val is not None:
+                normalized_val = val
+            if volt and not voltage:
+                voltage = volt
 
         conn = DatabaseHelper.get_connection()
         c = conn.cursor()
@@ -468,8 +915,8 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             c.execute('''
                 INSERT INTO components 
                 (name, category, raw_value, quantity, voltage, tolerance, component_type, subdivision_id, normalized_base_value)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            ''', (name, category, raw_val, int(qty), voltage, tolerance, comp_type, subdivision_id))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name, category, raw_val, int(qty), voltage, tolerance, comp_type, subdivision_id, normalized_val))
             conn.commit()
             messagebox.showinfo("Sucesso", f"Componente {name} salvo com sucesso!")
             
@@ -500,9 +947,9 @@ class SearchFrame(ctk.CTkFrame):
         self.search_entry = ctk.CTkEntry(self.search_container, width=300, placeholder_text="Pesquisar por Nome ou Valor...")
         self.search_entry.grid(row=0, column=0, padx=20, pady=15, sticky="w")
         
-        search_categories = ["Todos"] + CATEGORIES
+        self.cat_logic_map = {}
         self.cat_var = ctk.StringVar(value="Todos")
-        self.cat_menu = ctk.CTkOptionMenu(self.search_container, variable=self.cat_var, values=search_categories, command=self.on_search_category_change)
+        self.cat_menu = ctk.CTkOptionMenu(self.search_container, variable=self.cat_var, values=["Todos"], command=self.on_search_category_change)
         self.cat_menu.grid(row=0, column=1, padx=20, pady=15, sticky="w")
         
         self.search_btn = ctk.CTkButton(self.search_container, text="Pesquisar", command=self.perform_search)
@@ -513,6 +960,7 @@ class SearchFrame(ctk.CTkFrame):
         self.filters_frame.grid(row=1, column=0, columnspan=3, padx=20, pady=(0, 10), sticky="ew")
         
         self.dynamic_inputs = {}
+        self.update_categories()
         
         # Grid using ttk.Treeview
         self.tree_frame = ctk.CTkFrame(self)
@@ -547,13 +995,23 @@ class SearchFrame(ctk.CTkFrame):
         self.tree.configure(yscroll=self.scrollbar.set)
         self.scrollbar.pack(side="right", fill="y", pady=5)
 
+    def update_categories(self):
+        rows = DatabaseHelper.get_categories()
+        self.cat_logic_map = {row[0]: {'logic_type': row[1], 'fields': row[2]} for row in rows}
+        cat_names = ["Todos"] + list(self.cat_logic_map.keys())
+        self.cat_menu.configure(values=cat_names)
+        if self.cat_var.get() not in cat_names:
+            self.cat_var.set("Todos")
+        self.on_search_category_change(self.cat_var.get())
+
     def on_search_category_change(self, category):
         if category == "Todos":
             for widget in self.filters_frame.winfo_children():
                 widget.destroy()
             self.dynamic_inputs = {}
         else:
-            self.dynamic_inputs = CategoryUIBuilder.build_fields(self.filters_frame, category, is_search=True)
+            cat_config = getattr(self, 'cat_logic_map', {}).get(category, {'logic_type': 'Outros', 'fields': '[]'})
+            self.dynamic_inputs = CategoryUIBuilder.build_fields(self.filters_frame, cat_config, is_search=True)
 
     def perform_search(self):
         query_text = self.search_entry.get().strip()
@@ -563,27 +1021,41 @@ class SearchFrame(ctk.CTkFrame):
         
         sql = """
             SELECT c.name, c.category, c.raw_value, c.voltage, c.tolerance, c.component_type, c.quantity, 
-                   s.drawer_code, s.subdivision_index
+                   s.drawer_code, s.subdivision_index, c.normalized_base_value
             FROM components c
             JOIN subdivisions s ON c.subdivision_id = s.id
             WHERE 1=1
         """
         params = []
         
+        parsed_query = SMDDecoder.parse_search_query(query_text) if query_text else None
+        
         if query_text:
-            sql += " AND (c.name LIKE ? OR c.raw_value LIKE ?)"
-            params.extend([f"%{query_text}%", f"%{query_text}%"])
+            if parsed_query is not None:
+                margin = abs(parsed_query * 0.01) if parsed_query != 0 else 1e-12
+                sql += " AND (c.name LIKE ? OR c.raw_value LIKE ? OR (c.normalized_base_value >= ? AND c.normalized_base_value <= ?))"
+                params.extend([f"%{query_text}%", f"%{query_text}%", parsed_query - margin, parsed_query + margin])
+            else:
+                sql += " AND (c.name LIKE ? OR c.raw_value LIKE ?)"
+                params.extend([f"%{query_text}%", f"%{query_text}%"])
             
         if category != "Todos":
             sql += " AND c.category = ?"
             params.append(category)
             
             # Extract formatted values using the shared builder
-            raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(category, self.dynamic_inputs)
+            cat_config = getattr(self, 'cat_logic_map', {}).get(category, {'logic_type': 'Outros', 'fields': '[]'})
+            raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(cat_config, self.dynamic_inputs)
             
             if raw_val and "CORES:" not in raw_val:
-                sql += " AND c.raw_value LIKE ?"
-                params.append(f"%{raw_val}%")
+                parsed_raw = SMDDecoder.parse_search_query(raw_val)
+                if parsed_raw is not None:
+                    margin = abs(parsed_raw * 0.01) if parsed_raw != 0 else 1e-12
+                    sql += " AND (c.raw_value LIKE ? OR (c.normalized_base_value >= ? AND c.normalized_base_value <= ?))"
+                    params.extend([f"%{raw_val}%", parsed_raw - margin, parsed_raw + margin])
+                else:
+                    sql += " AND c.raw_value LIKE ?"
+                    params.append(f"%{raw_val}%")
             elif "CORES:" in raw_val and len(raw_val) > 6:
                 sql += " AND c.raw_value LIKE ?"
                 params.append(f"%{raw_val}%")
@@ -625,10 +1097,24 @@ class SearchFrame(ctk.CTkFrame):
                 
                 for _, row in df.iterrows():
                     try:
+                        cat = str(row['category'])
+                        raw_val = str(row['raw_value'])
+                        norm_val = row.get('normalized_base_value')
+                        
+                        if norm_val != "-" and not pd.isna(norm_val) and norm_val is not None:
+                            if cat == "Resistor SMD":
+                                formatted = SMDDecoder.format_resistance(norm_val)
+                                if formatted:
+                                    raw_val = f"{raw_val} = {formatted}"
+                            elif cat == "Capacitor SMD":
+                                formatted = SMDDecoder.format_capacitance(norm_val)
+                                if formatted:
+                                    raw_val = f"{raw_val} = {formatted}"
+
                         self.tree.insert("", "end", values=(
                             str(row['name']), 
-                            str(row['category']), 
-                            str(row['raw_value']), 
+                            cat, 
+                            raw_val, 
                             str(row['voltage']), 
                             str(row['tolerance']), 
                             str(row['component_type']), 
@@ -675,12 +1161,24 @@ class App(ctk.CTk):
         self.btn_search = ctk.CTkButton(self.sidebar, text="Pesquisar Componentes", command=self.show_search_frame)
         self.btn_search.grid(row=3, column=0, padx=20, pady=10)
         
+        self.btn_manage_cat = ctk.CTkButton(self.sidebar, text="Gerenciar Categorias", command=self.show_category_manager)
+        self.btn_manage_cat.grid(row=4, column=0, padx=20, pady=10)
+        
         self.drawer_frame = DrawerRegistrationFrame(self)
         self.comp_frame = ComponentRegistrationFrame(self)
         self.search_frame = SearchFrame(self)
         
         self.active_frame = None
         self.show_drawer_frame()
+
+    def show_category_manager(self):
+        CategoryManagerWindow(self, self.on_categories_updated)
+        
+    def on_categories_updated(self):
+        if hasattr(self, 'comp_frame'):
+            self.comp_frame.update_categories()
+        if hasattr(self, 'search_frame'):
+            self.search_frame.update_categories()
 
     def _hide_all_frames(self):
         if self.active_frame:
