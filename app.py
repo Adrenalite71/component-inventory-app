@@ -1560,14 +1560,15 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             cat_config = getattr(self, "cat_logic_map", {}).get(comp[2], {"logic_type": "Outros", "fields": "[]"})
             
             # Helper to set value safely inside dynamic_inputs
+            import tkinter as tk
             def set_val(key, val):
                 var = self.dynamic_inputs.get(key)
                 if var:
                     if isinstance(var, ctk.StringVar): 
-                        var.set(val)
+                        var.set(str(val))
                     elif isinstance(var, ctk.CTkEntry):
-                        var.delete(0, "end")
-                        var.insert(0, val)
+                        var.delete(0, tk.END)
+                        var.insert(0, str(val))
 
             logic_type = cat_config.get("logic_type", "Outros")
             c_raw = comp[3] if comp[3] else ""
