@@ -16,6 +16,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.9
+* Calculadora de Resistores PTH atualizada com modo bidirecional (Valor para Cores).
+
 ## v1.0.8
 * Sincronização bidirecional e tradutor automático de cores e valores para resistores.
 

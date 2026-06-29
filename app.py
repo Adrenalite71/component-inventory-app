@@ -1856,7 +1856,14 @@ class CalculatorsModal(ctk.CTkToplevel):
     def build_pth_tab(self):
         tab = self.tabview.tab("Resistor PTH")
         
-        top_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        self.pth_mode_var = ctk.StringVar(value="Cores para Valor")
+        self.pth_seg_btn = ctk.CTkSegmentedButton(tab, values=["Cores para Valor", "Valor para Cores"], variable=self.pth_mode_var, command=self.switch_pth_mode)
+        self.pth_seg_btn.pack(pady=(10, 5))
+        
+        self.pth_frame_c2v = ctk.CTkFrame(tab, fg_color="transparent")
+        self.pth_frame_v2c = ctk.CTkFrame(tab, fg_color="transparent")
+        
+        top_frame = ctk.CTkFrame(self.pth_frame_c2v, fg_color="transparent")
         top_frame.pack(pady=10)
         
         ctk.CTkLabel(top_frame, text="Bandas:").grid(row=0, column=0, padx=5)
@@ -1864,7 +1871,7 @@ class CalculatorsModal(ctk.CTkToplevel):
         menu = ctk.CTkOptionMenu(top_frame, variable=self.band_count_var, values=["4", "5", "6"], width=60, command=self.update_pth_bands)
         menu.grid(row=0, column=1, padx=5)
         
-        self.bands_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        self.bands_frame = ctk.CTkFrame(self.pth_frame_c2v, fg_color="transparent")
         self.bands_frame.pack(pady=10)
         
         self.band_vars = []
@@ -1878,11 +1885,55 @@ class CalculatorsModal(ctk.CTkToplevel):
             cb = ctk.CTkOptionMenu(self.bands_frame, variable=var, values=colors, width=80, command=self.calc_pth)
             self.band_combos.append(cb)
             
-        self.result_pth = ctk.CTkLabel(tab, text="-", font=ctk.CTkFont(size=24, weight="bold"))
+        self.result_pth = ctk.CTkLabel(self.pth_frame_c2v, text="-", font=ctk.CTkFont(size=24, weight="bold"))
         self.result_pth.pack(pady=20)
         
-        self.update_pth_bands()
+        v2c_top = ctk.CTkFrame(self.pth_frame_v2c, fg_color="transparent")
+        v2c_top.pack(pady=10)
         
+        ctk.CTkLabel(v2c_top, text="Valor (ex: 4k7, 100R):").grid(row=0, column=0, padx=5)
+        self.val_var = ctk.StringVar()
+        self.val_entry = ctk.CTkEntry(v2c_top, textvariable=self.val_var, width=100)
+        self.val_entry.grid(row=0, column=1, padx=5)
+        
+        ctk.CTkLabel(v2c_top, text="Tolerância:").grid(row=0, column=2, padx=5)
+        self.tol_var = ctk.StringVar(value="5%")
+        self.tol_combo = ctk.CTkOptionMenu(v2c_top, variable=self.tol_var, values=["1%", "2%", "5%", "10%"], width=70, command=self.calc_v2c)
+        self.tol_combo.grid(row=0, column=3, padx=5)
+        
+        calc_btn = ctk.CTkButton(self.pth_frame_v2c, text="Calcular", command=self.calc_v2c)
+        calc_btn.pack(pady=10)
+        
+        self.result_v2c = ctk.CTkLabel(self.pth_frame_v2c, text="-", font=ctk.CTkFont(size=14, weight="bold"))
+        self.result_v2c.pack(pady=20)
+        
+        self.val_entry.bind("<Return>", self.calc_v2c)
+        
+        self.switch_pth_mode("Cores para Valor")
+        self.update_pth_bands()
+
+    def switch_pth_mode(self, mode):
+        if mode == "Cores para Valor":
+            self.pth_frame_v2c.pack_forget()
+            self.pth_frame_c2v.pack(expand=True, fill="both")
+        else:
+            self.pth_frame_c2v.pack_forget()
+            self.pth_frame_v2c.pack(expand=True, fill="both")
+
+    def calc_v2c(self, *args):
+        val_str = self.val_var.get().strip()
+        tol_str = self.tol_var.get()
+        if not val_str:
+            self.result_v2c.configure(text="-")
+            return
+            
+        bands = PTHResistorReverseParser.get_bands(val_str, tol_str)
+        if bands:
+            res_text = "  |  ".join([f"Banda {i+1}: {b}" for i, b in enumerate(bands)])
+            self.result_v2c.configure(text=res_text)
+        else:
+            self.result_v2c.configure(text="Valor Inválido")
+            
     def update_pth_bands(self, *args):
         count = int(self.band_count_var.get())
         
@@ -1983,6 +2034,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.9
+* Calculadora de Resistores PTH atualizada com modo bidirecional (Valor para Cores).
+
 ## v1.0.8
 * Implementação de sincronização bidirecional na tela de registro do Resistor PTH e cálculo de cores a partir de valores manuais via parser de engenharia reverso.
 
@@ -2016,7 +2070,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.8")
+        self.title("Inventário de Componentes v1.0.9")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2089,7 +2143,7 @@ class App(ctk.CTk):
         import json
         import os
         settings_path = "settings.json"
-        current_version = "1.0.8"
+        current_version = "1.0.9"
         last_seen = "1.0.0"
         
         if os.path.exists(settings_path):
