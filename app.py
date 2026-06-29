@@ -1272,7 +1272,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 "component_type": comp[6] if comp[6] else "",
                 "properties": properties
             }
-            print(f"DEBUG - Loaded Properties from DB: {properties_dict}")
+
 
             logic_type = cat_config.get("logic_type", "Outros")
             c_raw = comp[3] if comp[3] else ""
