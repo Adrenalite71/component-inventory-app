@@ -1407,7 +1407,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.slot_mapping = {}
         self.slot_var = ctk.StringVar(value="")
         self.slot_menu = ctk.CTkOptionMenu(
-            self.container, variable=self.slot_var, values=[], width=400
+            self.container, variable=self.slot_var, values=[], width=400, command=self.on_slot_select
         )
         self.slot_menu.grid(row=1, column=1, padx=20, pady=10, sticky="w")
 
@@ -1525,9 +1525,80 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         if self.slot_options:
             self.slot_menu.configure(values=self.slot_options)
             self.slot_var.set(self.slot_options[0])
+            self.on_slot_select(self.slot_options[0])
         else:
             self.slot_menu.configure(values=["Sem divisões"])
             self.slot_var.set("Sem divisões")
+
+    def on_slot_select(self, slot_label):
+        if slot_label not in self.slot_mapping:
+            return
+            
+        comp_id = self.slot_mapping[slot_label]["comp_id"]
+        if not comp_id:
+            # Clear form
+            self.name_entry.delete(0, "end")
+            self.qty_entry.delete(0, "end")
+            self.qty_entry.insert(0, "1")
+            return
+            
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT name, quantity, category, raw_value, voltage, tolerance, component_type FROM components WHERE id = ?", (comp_id,))
+        comp = c.fetchone()
+        conn.close()
+        
+        if comp:
+            self.name_entry.delete(0, "end")
+            self.name_entry.insert(0, comp[0])
+            self.qty_entry.delete(0, "end")
+            self.qty_entry.insert(0, str(comp[1]))
+            
+            self.cat_var.set(comp[2])
+            self.on_category_change(comp[2])
+            
+            cat_config = getattr(self, "cat_logic_map", {}).get(comp[2], {"logic_type": "Outros", "fields": "[]"})
+            
+            # Helper to map raw values back to dynamic inputs
+            import ast
+            try:
+                fields = ast.literal_eval(cat_config["fields"])
+            except:
+                fields = []
+                
+            for field in fields:
+                field_name = field["name"]
+                if field_name == "Código SMD" or field_name == "Capacitância" or field_name == "Indutância":
+                    var = self.dynamic_inputs.get(field_name)
+                    if var:
+                        if isinstance(var, ctk.StringVar): var.set(comp[3] if comp[3] else "")
+                        elif isinstance(var, ctk.CTkEntry): 
+                            var.delete(0, "end")
+                            var.insert(0, comp[3] if comp[3] else "")
+                elif field_name == "Tensão Máx (VCEO/VDS)" or field_name == "Tensão":
+                    var = self.dynamic_inputs.get(field_name)
+                    if var:
+                        if isinstance(var, ctk.StringVar): var.set(comp[4] if comp[4] else "")
+                elif field_name == "Corrente Máx (IC/ID)" or field_name == "Tolerância":
+                    var = self.dynamic_inputs.get(field_name)
+                    if var:
+                        if isinstance(var, ctk.StringVar): var.set(comp[5] if comp[5] else "")
+                elif field_name == "Encapsulamento" or field_name == "Tipo":
+                    var = self.dynamic_inputs.get(field_name)
+                    if var:
+                        if isinstance(var, ctk.StringVar): var.set(comp[6] if comp[6] else "")
+                elif field_name == "Bandas":
+                    if comp[3] and "CORES:" in comp[3]:
+                        colors_str = comp[3].replace("CORES: ", "")
+                        bands = colors_str.split("-")
+                        count_var = self.dynamic_inputs.get("Bandas_count")
+                        if count_var:
+                            count_var.set(str(len(bands)))
+                            
+                        band_vars = self.dynamic_inputs.get("Bandas_vars", [])
+                        for i, color in enumerate(bands):
+                            if i < len(band_vars):
+                                band_vars[i].set(color)
 
     def on_category_change(self, category):
         cat_config = getattr(self, "cat_logic_map", {}).get(
@@ -1609,6 +1680,9 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             )
             conn.commit()
             messagebox.showinfo("Sucesso", f"Componente {name} salvo com sucesso!")
+            
+            if hasattr(self.master, 'search_frame'):
+                self.master.search_frame.perform_search()
 
             # Reset UI
             self.name_entry.delete(0, "end")
@@ -1733,7 +1807,7 @@ class SearchFrame(ctk.CTkFrame):
         comp_name = values[0]
         current_qty = int(values[6])
         
-        StockAdjustmentModal(self, comp_id, comp_name, current_qty, self.search_components)
+        StockAdjustmentModal(self, comp_id, comp_name, current_qty, self.perform_search)
 
     def update_categories(self):
         rows = DatabaseHelper.get_categories()
@@ -1766,7 +1840,7 @@ class SearchFrame(ctk.CTkFrame):
         conn = DatabaseHelper.get_connection()
 
         sql = """
-            SELECT c.name, c.category, c.raw_value, c.voltage, c.tolerance, c.component_type, c.quantity, 
+            SELECT c.id, c.name, c.category, c.raw_value, c.voltage, c.tolerance, c.component_type, c.quantity, 
                    s.drawer_code, s.subdivision_index, c.normalized_base_value
             FROM components c
             JOIN subdivisions s ON c.subdivision_id = s.id
@@ -2098,11 +2172,48 @@ class CalculatorsModal(ctk.CTkToplevel):
 
 
 
+import json
+import os
+
+class ReleaseNotesModal(ctk.CTkToplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Novidades da Versão")
+        self.geometry("600x450")
+        self.grab_set()
+
+        lbl_title = ctk.CTkLabel(self, text="O que há de novo?", font=ctk.CTkFont(size=24, weight="bold"))
+        lbl_title.pack(pady=(20, 10))
+
+        textbox = ctk.CTkTextbox(self, wrap="word", font=ctk.CTkFont(size=14))
+        textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
+        
+        changelog = """
+## v1.0.5
+* Correção de carregamento de dados nas gavetas (edição de componentes agora preenche os dados corretamente).
+* Sincronização corrigida na tela de pesquisa paramétrica.
+* Adicionado painel de novidades e registro de versão.
+
+## v1.0.4
+* Adicionadas ferramentas de Calculadora Eletrônica (Resistor PTH, Resistor SMD, Capacitor SMD).
+* Adicionado ajuste rápido de estoque (+ / -) direto na aba de Pesquisa via duplo-clique.
+
+## v1.0.3
+* Calculadora de códigos de cores para resistores PTH e exibição formatada.
+* Correções no gerenciamento de gavetas e salvamento de componentes.
+"""
+        textbox.insert("0.0", changelog.strip())
+        textbox.configure(state="disabled")
+        
+        btn_close = ctk.CTkButton(self, text="Fechar", command=self.destroy)
+        btn_close.pack(pady=(0, 20))
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.4")
+        self.title("Inventário de Componentes v1.0.5")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2151,7 +2262,16 @@ class App(ctk.CTk):
             fg_color="#8B0000",
             hover_color="#A52A2A"
         )
-        self.btn_calculators.grid(row=5, column=0, padx=20, pady=(10, 30), sticky="s")
+        self.btn_calculators.grid(row=5, column=0, padx=20, pady=10)
+        
+        self.btn_changelog = ctk.CTkButton(
+            self.sidebar,
+            text="Novidades da Versão",
+            command=self.show_changelog,
+            fg_color="#006400",
+            hover_color="#008000"
+        )
+        self.btn_changelog.grid(row=6, column=0, padx=20, pady=(10, 30), sticky="s")
 
         self.drawer_frame = DrawerRegistrationFrame(self)
         self.comp_frame = ComponentRegistrationFrame(self)
@@ -2159,6 +2279,34 @@ class App(ctk.CTk):
 
         self.active_frame = None
         self.show_drawer_frame()
+        
+        self.check_changelog()
+
+    def check_changelog(self):
+        import json
+        import os
+        settings_path = "settings.json"
+        current_version = "1.0.5"
+        last_seen = "1.0.0"
+        
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                last_seen = settings.get("last_seen_version", "1.0.0")
+            except:
+                pass
+                
+        if last_seen < current_version:
+            self.show_changelog()
+            try:
+                with open(settings_path, "w", encoding="utf-8") as f:
+                    json.dump({"last_seen_version": current_version}, f)
+            except:
+                pass
+
+    def show_changelog(self):
+        ReleaseNotesModal(self)
 
     def show_category_manager(self):
         CategoryManagerWindow(self, self.on_categories_updated)
