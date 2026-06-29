@@ -1559,7 +1559,102 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             
             cat_config = getattr(self, "cat_logic_map", {}).get(comp[2], {"logic_type": "Outros", "fields": "[]"})
             
-            # Helper to map raw values back to dynamic inputs
+            # Helper to set value safely inside dynamic_inputs
+            def set_val(key, val):
+                var = self.dynamic_inputs.get(key)
+                if var:
+                    if isinstance(var, ctk.StringVar): 
+                        var.set(val)
+                    elif isinstance(var, ctk.CTkEntry):
+                        var.delete(0, "end")
+                        var.insert(0, val)
+
+            logic_type = cat_config.get("logic_type", "Outros")
+            c_raw = comp[3] if comp[3] else ""
+            c_volt = comp[4] if comp[4] else ""
+            c_tol = comp[5] if comp[5] else ""
+            c_type = comp[6] if comp[6] else ""
+            
+            if logic_type == "Resistor PTH":
+                if "CORES:" in c_raw:
+                    set_val("r_method", "Cores (Bandas)")
+                    # We must manually trigger the callback for the segmented button
+                    # CategoryUIBuilder sets the segmented button command internally, 
+                    # but we can simulate the toggle by calling the inner method if we had access.
+                    # Since we don't, we can just trigger it using event generation if it was a standard widget.
+                    # CTkSegmentedButton doesn't support easy programmatic trigger.
+                    # But wait! We can just call it through self.dynamic_frame's children!
+                    # Actually, the simplest way is to pass initial_values dict to CategoryUIBuilder!
+                    # But modifying CategoryUIBuilder is risky.
+                    # Let's just find the segmented button and call its _command.
+                    for widget in self.dynamic_frame.winfo_children():
+                        if isinstance(widget, ctk.CTkSegmentedButton):
+                            if widget._command:
+                                widget._command("Cores (Bandas)")
+                            break
+
+                    colors_str = c_raw.replace("CORES: ", "")
+                    bands = colors_str.split("-")
+                    set_val("r_band_count", str(len(bands)))
+                    
+                    # Update visible bands
+                    for widget in self.dynamic_frame.winfo_children():
+                        if isinstance(widget, ctk.CTkFrame): # bands_frame is a child
+                            for child in widget.winfo_children():
+                                if isinstance(child, ctk.CTkOptionMenu) and child.cget("values") == ["4", "5", "6"]:
+                                    if child._command:
+                                        child._command(str(len(bands)))
+                                    break
+                    
+                    band_vars = self.dynamic_inputs.get("r_bands", [])
+                    for i, color in enumerate(bands):
+                        if i < len(band_vars):
+                            band_vars[i].set(color)
+                    
+                    set_val("component_type", c_type)
+                else:
+                    set_val("r_method", "Entrada Direta")
+                    for widget in self.dynamic_frame.winfo_children():
+                        if isinstance(widget, ctk.CTkSegmentedButton):
+                            if widget._command:
+                                widget._command("Entrada Direta")
+                            break
+                    set_val("raw_value", c_raw)
+                    set_val("tolerance", c_tol)
+                    set_val("component_type", c_type)
+                    
+            elif logic_type == "Transistor":
+                # Raw value format: "BJT (NPN)"
+                import re
+                m = re.match(r"(.*?)\s*\((.*?)\)", c_raw)
+                tipo = c_raw
+                pol = ""
+                if m:
+                    tipo = m.group(1).strip()
+                    pol = m.group(2).strip()
+                
+                set_val("transistor_tipo", tipo)
+                # trigger the combobox command
+                for widget in self.dynamic_frame.winfo_children():
+                    if isinstance(widget, ctk.CTkOptionMenu):
+                        vals = widget.cget("values")
+                        if vals and "BJT" in vals:
+                            if widget._command:
+                                widget._command(tipo)
+                            break
+                            
+                set_val("transistor_pol", pol)
+                set_val("voltage", c_volt)
+                set_val("tolerance", c_tol)
+                set_val("component_type", c_type)
+                
+            else:
+                set_val("raw_value", c_raw)
+                set_val("voltage", c_volt)
+                set_val("tolerance", c_tol)
+                set_val("component_type", c_type)
+                
+            # For JSON custom fields
             import ast
             try:
                 fields = ast.literal_eval(cat_config["fields"])
@@ -1568,37 +1663,14 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 
             for field in fields:
                 field_name = field["name"]
-                if field_name == "Código SMD" or field_name == "Capacitância" or field_name == "Indutância":
-                    var = self.dynamic_inputs.get(field_name)
-                    if var:
-                        if isinstance(var, ctk.StringVar): var.set(comp[3] if comp[3] else "")
-                        elif isinstance(var, ctk.CTkEntry): 
-                            var.delete(0, "end")
-                            var.insert(0, comp[3] if comp[3] else "")
-                elif field_name == "Tensão Máx (VCEO/VDS)" or field_name == "Tensão":
-                    var = self.dynamic_inputs.get(field_name)
-                    if var:
-                        if isinstance(var, ctk.StringVar): var.set(comp[4] if comp[4] else "")
-                elif field_name == "Corrente Máx (IC/ID)" or field_name == "Tolerância":
-                    var = self.dynamic_inputs.get(field_name)
-                    if var:
-                        if isinstance(var, ctk.StringVar): var.set(comp[5] if comp[5] else "")
-                elif field_name == "Encapsulamento" or field_name == "Tipo":
-                    var = self.dynamic_inputs.get(field_name)
-                    if var:
-                        if isinstance(var, ctk.StringVar): var.set(comp[6] if comp[6] else "")
-                elif field_name == "Bandas":
-                    if comp[3] and "CORES:" in comp[3]:
-                        colors_str = comp[3].replace("CORES: ", "")
-                        bands = colors_str.split("-")
-                        count_var = self.dynamic_inputs.get("Bandas_count")
-                        if count_var:
-                            count_var.set(str(len(bands)))
-                            
-                        band_vars = self.dynamic_inputs.get("Bandas_vars", [])
-                        for i, color in enumerate(bands):
-                            if i < len(band_vars):
-                                band_vars[i].set(color)
+                if field_name in ["Código SMD", "Capacitância", "Indutância"]:
+                    set_val(field_name, c_raw)
+                elif field_name in ["Tensão Máx (VCEO/VDS)", "Tensão"]:
+                    set_val(field_name, c_volt)
+                elif field_name in ["Corrente Máx (IC/ID)", "Tolerância"]:
+                    set_val(field_name, c_tol)
+                elif field_name in ["Encapsulamento", "Tipo"]:
+                    set_val(field_name, c_type)
 
     def on_category_change(self, category):
         cat_config = getattr(self, "cat_logic_map", {}).get(
@@ -2189,6 +2261,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.6
+* Correção no carregamento profundo de dados. Parâmetros específicos (como valores e cores) agora são exibidos corretamente ao editar um componente.
+
 ## v1.0.5
 * Correção de carregamento de dados nas gavetas (edição de componentes agora preenche os dados corretamente).
 * Sincronização corrigida na tela de pesquisa paramétrica.
@@ -2213,7 +2288,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.5")
+        self.title("Inventário de Componentes v1.0.6")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2286,7 +2361,7 @@ class App(ctk.CTk):
         import json
         import os
         settings_path = "settings.json"
-        current_version = "1.0.5"
+        current_version = "1.0.6"
         last_seen = "1.0.0"
         
         if os.path.exists(settings_path):
