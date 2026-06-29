@@ -30,7 +30,7 @@ class DatabaseHelper:
         c.execute('''
             CREATE TABLE IF NOT EXISTS drawers (
                 door_code TEXT PRIMARY KEY CHECK(length(door_code) = 4),
-                capacity INTEGER CHECK(capacity >= 1 AND capacity <= 5)
+                capacity INTEGER
             )
         ''')
         c.execute('''
@@ -41,6 +41,16 @@ class DatabaseHelper:
                 FOREIGN KEY(drawer_code) REFERENCES drawers(door_code)
             )
         ''')
+        
+        # MIGRATION: Remove capacity constraint from drawers table if it exists
+        c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='drawers'")
+        row = c.fetchone()
+        if row and "capacity <=" in row[0]:
+            c.execute("CREATE TABLE drawers_new (door_code TEXT PRIMARY KEY CHECK(length(door_code) = 4), capacity INTEGER)")
+            c.execute("INSERT INTO drawers_new SELECT * FROM drawers")
+            c.execute("DROP TABLE drawers")
+            c.execute("ALTER TABLE drawers_new RENAME TO drawers")
+
         c.execute('''
             CREATE TABLE IF NOT EXISTS components (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -704,7 +714,7 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         
-        self.label = ctk.CTkLabel(self, text="Registro de Gaveta", font=ctk.CTkFont(size=24, weight="bold"))
+        self.label = ctk.CTkLabel(self, text="Gerenciamento de Gavetas", font=ctk.CTkFont(size=24, weight="bold"))
         self.label.pack(pady=20, padx=20, anchor="w")
         
         self.form_frame = ctk.CTkFrame(self)
@@ -715,33 +725,142 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
         self.code_entry = ctk.CTkEntry(self.form_frame, width=200)
         self.code_entry.grid(row=0, column=1, padx=20, pady=20, sticky="w")
         
-        self.cap_label = ctk.CTkLabel(self.form_frame, text="Capacidade de Divisões (1-5):")
+        self.cap_label = ctk.CTkLabel(self.form_frame, text="Número de Divisões:")
         self.cap_label.grid(row=1, column=0, padx=20, pady=20, sticky="w")
         
-        self.cap_var = ctk.StringVar(value="1")
-        self.cap_menu = ctk.CTkOptionMenu(self.form_frame, variable=self.cap_var, values=["1", "2", "3", "4", "5"])
-        self.cap_menu.grid(row=1, column=1, padx=20, pady=20, sticky="w")
+        self.cap_entry = ctk.CTkEntry(self.form_frame, width=200, placeholder_text="Ex: 5")
+        self.cap_entry.insert(0, "1")
+        self.cap_entry.grid(row=1, column=1, padx=20, pady=20, sticky="w")
         
-        self.submit_btn = ctk.CTkButton(self, text="Registrar Gaveta", command=self.register_drawer, height=40)
-        self.submit_btn.pack(pady=20, padx=20, anchor="w")
-
-    def register_drawer(self):
-        code = self.code_entry.get().strip()
-        capacity = int(self.cap_var.get())
+        self.submit_btn = ctk.CTkButton(self, text="Salvar Gaveta", command=self.save_drawer, height=40)
+        self.submit_btn.pack(pady=10, padx=20, anchor="w")
         
-        if len(code) != 4 or not code.isdigit():
-            messagebox.showerror("Erro", "O código da gaveta deve ter exatamente 4 dígitos numéricos.")
+        # Drawers list
+        self.list_label = ctk.CTkLabel(self, text="Gavetas Existentes", font=ctk.CTkFont(size=18, weight="bold"))
+        self.list_label.pack(pady=(20, 5), padx=20, anchor="w")
+        
+        self.list_frame = ctk.CTkScrollableFrame(self, height=300)
+        self.list_frame.pack(pady=5, padx=20, fill="both", expand=True)
+        
+        self.editing_code = None
+        self.load_drawers()
+        
+    def load_drawers(self):
+        for widget in self.list_frame.winfo_children():
+            widget.destroy()
+            
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT door_code, capacity FROM drawers ORDER BY door_code")
+        drawers = c.fetchall()
+        conn.close()
+        
+        for idx, (code, cap) in enumerate(drawers):
+            row_frame = ctk.CTkFrame(self.list_frame, fg_color=("gray85", "gray25"))
+            row_frame.pack(fill="x", pady=2, padx=5)
+            
+            ctk.CTkLabel(row_frame, text=f"Gaveta {code} ({cap} divisões)").pack(side="left", padx=10, pady=5)
+            
+            del_btn = ctk.CTkButton(row_frame, text="Excluir", width=80, fg_color="red", hover_color="darkred",
+                                    command=lambda c=code: self.delete_drawer(c))
+            del_btn.pack(side="right", padx=10, pady=5)
+            
+            edit_btn = ctk.CTkButton(row_frame, text="Editar", width=80,
+                                     command=lambda c=code, cap=cap: self.edit_drawer(c, cap))
+            edit_btn.pack(side="right", padx=5, pady=5)
+            
+    def edit_drawer(self, code, capacity):
+        self.editing_code = code
+        self.code_entry.delete(0, 'end')
+        self.code_entry.insert(0, code)
+        self.cap_entry.delete(0, 'end')
+        self.cap_entry.insert(0, str(capacity))
+        self.submit_btn.configure(text="Atualizar Gaveta")
+        
+    def delete_drawer(self, code):
+        if not messagebox.askyesno("Confirmar Exclusão", "Tem certeza que deseja excluir esta gaveta?\n\nATENÇÃO: Todos os componentes contidos nela também serão permanentemente removidos."):
             return
             
         conn = DatabaseHelper.get_connection()
         c = conn.cursor()
         try:
-            c.execute("INSERT INTO drawers (door_code, capacity) VALUES (?, ?)", (code, capacity))
-            for i in range(1, capacity + 1):
-                c.execute("INSERT INTO subdivisions (drawer_code, subdivision_index) VALUES (?, ?)", (code, i))
+            c.execute("DELETE FROM components WHERE subdivision_id IN (SELECT id FROM subdivisions WHERE drawer_code = ?)", (code,))
+            c.execute("DELETE FROM subdivisions WHERE drawer_code = ?", (code,))
+            c.execute("DELETE FROM drawers WHERE door_code = ?", (code,))
             conn.commit()
-            messagebox.showinfo("Sucesso", f"Gaveta {code} registrada com sucesso com {capacity} divisões!")
+            messagebox.showinfo("Sucesso", f"Gaveta {code} e seus componentes foram excluídos com sucesso.")
+            self.load_drawers()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Ocorreu um erro ao excluir a gaveta: {str(e)}")
+        finally:
+            conn.close()
+
+    def save_drawer(self):
+        code = self.code_entry.get().strip()
+        capacity_str = self.cap_entry.get().strip()
+        
+        if len(code) != 4 or not code.isdigit():
+            messagebox.showerror("Erro", "O código da gaveta deve ter exatamente 4 dígitos numéricos.")
+            return
+            
+        if not capacity_str.isdigit() or int(capacity_str) < 1:
+            messagebox.showerror("Erro", "A capacidade de divisões deve ser um número inteiro positivo.")
+            return
+            
+        capacity = int(capacity_str)
+        
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        try:
+            if self.editing_code:
+                # Editing existing drawer
+                if self.editing_code != code:
+                    # Rename drawer (door_code). Need to check if new code exists
+                    c.execute("SELECT 1 FROM drawers WHERE door_code = ?", (code,))
+                    if c.fetchone():
+                        messagebox.showerror("Erro", f"Já existe uma gaveta com o código {code}.")
+                        return
+                    c.execute("UPDATE subdivisions SET drawer_code = ? WHERE drawer_code = ?", (code, self.editing_code))
+                    c.execute("UPDATE drawers SET door_code = ?, capacity = ? WHERE door_code = ?", (code, capacity, self.editing_code))
+                else:
+                    c.execute("UPDATE drawers SET capacity = ? WHERE door_code = ?", (capacity, self.editing_code))
+                
+                # Manage subdivisions
+                c.execute("SELECT count(*) FROM subdivisions WHERE drawer_code = ?", (code,))
+                current_subs = c.fetchone()[0]
+                
+                if capacity > current_subs:
+                    for i in range(current_subs + 1, capacity + 1):
+                        c.execute("INSERT INTO subdivisions (drawer_code, subdivision_index) VALUES (?, ?)", (code, i))
+                elif capacity < current_subs:
+                    c.execute('''
+                        SELECT count(*) FROM components c
+                        JOIN subdivisions s ON c.subdivision_id = s.id
+                        WHERE s.drawer_code = ? AND s.subdivision_index > ?
+                    ''', (code, capacity))
+                    if c.fetchone()[0] > 0:
+                        messagebox.showerror("Erro", "Existem componentes nas divisões que seriam removidas. Por favor, mova ou exclua esses componentes antes de reduzir a capacidade.")
+                        return
+                    else:
+                        c.execute("DELETE FROM subdivisions WHERE drawer_code = ? AND subdivision_index > ?", (code, capacity))
+                        
+                conn.commit()
+                messagebox.showinfo("Sucesso", f"Gaveta {code} atualizada com sucesso!")
+                self.editing_code = None
+                self.submit_btn.configure(text="Salvar Gaveta")
+            else:
+                # New drawer
+                c.execute("INSERT INTO drawers (door_code, capacity) VALUES (?, ?)", (code, capacity))
+                for i in range(1, capacity + 1):
+                    c.execute("INSERT INTO subdivisions (drawer_code, subdivision_index) VALUES (?, ?)", (code, i))
+                conn.commit()
+                messagebox.showinfo("Sucesso", f"Gaveta {code} registrada com sucesso com {capacity} divisões!")
+                
             self.code_entry.delete(0, 'end')
+            self.cap_entry.delete(0, 'end')
+            self.cap_entry.insert(0, "1")
+            self.load_drawers()
+            
         except sqlite3.IntegrityError:
             messagebox.showerror("Erro", f"Gaveta {code} já existe no sistema.")
         except Exception as e:
@@ -913,6 +1032,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         cat_config = getattr(self, 'cat_logic_map', {}).get(category, {'logic_type': 'Outros', 'fields': '[]'})
         raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(cat_config, self.dynamic_inputs)
         
+        logic_type = cat_config.get('logic_type', 'Outros')
         normalized_val = None
         
         if logic_type == "Resistor SMD" and raw_val:
@@ -951,7 +1071,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.on_drawer_select(self.drawer_var.get())
             
         except Exception as e:
-            messagebox.showerror("Erro de Banco de Dados", str(e))
+            messagebox.showerror("Erro ao salvar componente", f"Detalhes: {str(e)}")
         finally:
             conn.close()
 
@@ -1157,7 +1277,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes")
+        self.title("Inventário de Componentes v1.0.2")
         self.geometry("1400x800")
         
         ctk.set_appearance_mode("dark")
