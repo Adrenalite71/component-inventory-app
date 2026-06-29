@@ -254,6 +254,47 @@ class SMDDecoder:
         if val >= 1e-9: return f"{val/1e-9:g}nF"
         return f"{val/1e-12:g}pF"
 
+
+class PTHResistorCalculator:
+    DIGITS = {
+        "Preto": 0, "Marrom": 1, "Vermelho": 2, "Laranja": 3, "Amarelo": 4, 
+        "Verde": 5, "Azul": 6, "Violeta": 7, "Cinza": 8, "Branco": 9
+    }
+    MULTIPLIERS = {
+        "Preto": 1, "Marrom": 10, "Vermelho": 100, "Laranja": 1000, "Amarelo": 10000, 
+        "Verde": 100000, "Azul": 1000000, "Violeta": 10000000, "Cinza": 100000000, "Branco": 1000000000,
+        "Dourado": 0.1, "Prateado": 0.01
+    }
+    TOLERANCES = {
+        "Marrom": "1%", "Vermelho": "2%", "Verde": "0.5%", "Azul": "0.25%", 
+        "Violeta": "0.1%", "Cinza": "0.05%", "Dourado": "5%", "Prateado": "10%"
+    }
+    TEMP_COEFFS = {
+        "Marrom": "100ppm", "Vermelho": "50ppm", "Laranja": "15ppm", "Amarelo": "25ppm",
+        "Azul": "10ppm", "Violeta": "5ppm", "Branco": "1ppm"
+    }
+
+    @staticmethod
+    def calculate(bands):
+        if not bands: return ""
+        try:
+            if len(bands) == 4:
+                val = (PTHResistorCalculator.DIGITS[bands[0]] * 10 + PTHResistorCalculator.DIGITS[bands[1]]) * PTHResistorCalculator.MULTIPLIERS[bands[2]]
+                tol = PTHResistorCalculator.TOLERANCES.get(bands[3], "")
+                return f"{SMDDecoder.format_resistance(val)} {tol}".strip()
+            elif len(bands) == 5:
+                val = (PTHResistorCalculator.DIGITS[bands[0]] * 100 + PTHResistorCalculator.DIGITS[bands[1]] * 10 + PTHResistorCalculator.DIGITS[bands[2]]) * PTHResistorCalculator.MULTIPLIERS[bands[3]]
+                tol = PTHResistorCalculator.TOLERANCES.get(bands[4], "")
+                return f"{SMDDecoder.format_resistance(val)} {tol}".strip()
+            elif len(bands) == 6:
+                val = (PTHResistorCalculator.DIGITS[bands[0]] * 100 + PTHResistorCalculator.DIGITS[bands[1]] * 10 + PTHResistorCalculator.DIGITS[bands[2]]) * PTHResistorCalculator.MULTIPLIERS[bands[3]]
+                tol = PTHResistorCalculator.TOLERANCES.get(bands[4], "")
+                tc = PTHResistorCalculator.TEMP_COEFFS.get(bands[5], "")
+                return f"{SMDDecoder.format_resistance(val)} {tol} {tc}".strip()
+            return ""
+        except KeyError:
+            return ""
+
 class CategoryUIBuilder:
     """Shared class to build exactly identical UI components for both Registration and Search"""
     
@@ -345,9 +386,36 @@ class CategoryUIBuilder:
             
             def update_bands(*args):
                 count = int(band_count_var.get())
+                
+                digits_colors = ["Preto", "Marrom", "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Violeta", "Cinza", "Branco"]
+                multi_colors = ["Preto", "Marrom", "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Violeta", "Cinza", "Branco", "Dourado", "Prateado"]
+                tol_colors = ["Marrom", "Vermelho", "Verde", "Azul", "Violeta", "Cinza", "Dourado", "Prateado"]
+                temp_colors = ["Marrom", "Vermelho", "Laranja", "Amarelo", "Azul", "Violeta", "Branco"]
+                
                 for i, cb in enumerate(band_combos):
                     if i < count:
                         cb.grid(row=0, column=2+i, padx=2, pady=10)
+                        vals = []
+                        if count == 4:
+                            if i < 2: vals = digits_colors
+                            elif i == 2: vals = multi_colors
+                            else: vals = tol_colors
+                        elif count == 5:
+                            if i < 3: vals = digits_colors
+                            elif i == 3: vals = multi_colors
+                            else: vals = tol_colors
+                        elif count == 6:
+                            if i < 3: vals = digits_colors
+                            elif i == 3: vals = multi_colors
+                            elif i == 4: vals = tol_colors
+                            else: vals = temp_colors
+                            
+                        if is_search:
+                            vals = [""] + vals
+                            
+                        cb.configure(values=vals)
+                        if cb.get() not in vals:
+                            cb.set(vals[0] if vals else "")
                     else:
                         cb.grid_forget()
             
@@ -1253,6 +1321,12 @@ class SearchFrame(ctk.CTkFrame):
                                 formatted = SMDDecoder.format_capacitance(norm_val)
                                 if formatted:
                                     raw_val = f"{raw_val} = {formatted}"
+                        elif cat == "Resistor PTH" and raw_val.startswith("CORES: "):
+                            colors_str = raw_val.replace("CORES: ", "")
+                            bands = colors_str.split("-")
+                            formatted = PTHResistorCalculator.calculate(bands)
+                            if formatted:
+                                raw_val = formatted
 
                         self.tree.insert("", "end", values=(
                             str(row['name']), 
@@ -1277,7 +1351,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.2")
+        self.title("Inventário de Componentes v1.0.3")
         self.geometry("1400x800")
         
         ctk.set_appearance_mode("dark")
