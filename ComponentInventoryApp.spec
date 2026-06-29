@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='ComponentInventoryApp',
+    name='Inventario_de_Componentes',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

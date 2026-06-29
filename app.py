@@ -16,8 +16,6 @@ CATEGORIES = [
     "Transistor",
     "Indutor",
     "CI (Circuito Integrado)",
-    "MOSFET", 
-    "IGBT", 
     "Optoacoplador", 
     "Outros"
 ]
@@ -85,6 +83,8 @@ class DatabaseHelper:
         if c.fetchone()[0] == 0:
             for cat in CATEGORIES:
                 c.execute("INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)", (cat, cat, '[]'))
+        
+        c.execute("DELETE FROM categories WHERE name IN ('MOSFET', 'IGBT')")
             
         conn.commit()
         conn.close()
@@ -392,15 +392,15 @@ class CategoryUIBuilder:
                     pol_label.grid_remove()
                     pol_combo.grid_remove()
                     inputs["transistor_pol"].set("")
-                else: # Outro, empty etc
+                else: # empty etc (for search)
                     pol_label.grid()
                     pol_combo.grid()
-                    pol_vals = ["NPN", "PNP", "Canal N", "Canal P", "Outra"]
+                    pol_vals = ["NPN", "PNP", "Canal N", "Canal P"]
                     if is_search: pol_vals.insert(0, "")
                     pol_combo.configure(values=pol_vals)
 
-            tipo_combo, tipo_label = add_combo(0, 0, "Tipo:", "transistor_tipo", ["BJT", "MOSFET", "Darlington", "IGBT", "Outro"], command=on_tipo_change)
-            pol_combo, pol_label = add_combo(0, 1, "Polaridade:", "transistor_pol", ["NPN", "PNP", "Canal N", "Canal P", "Outra"])
+            tipo_combo, tipo_label = add_combo(0, 0, "Tipo:", "transistor_tipo", ["BJT", "MOSFET", "Darlington", "IGBT"], command=on_tipo_change)
+            pol_combo, pol_label = add_combo(0, 1, "Polaridade:", "transistor_pol", ["NPN", "PNP", "Canal N", "Canal P"])
             add_entry(0, 2, "Encapsulamento:", "component_type")
             add_entry(1, 0, "Tensão Máx (VCEO/VDS):", "voltage")
             add_entry(1, 1, "Corrente Máx (IC/ID):", "tolerance")
@@ -416,16 +416,6 @@ class CategoryUIBuilder:
         elif category == "CI (Circuito Integrado)":
             add_entry(0, 0, "Função/Modelo (ex: NE555):", "raw_value")
             add_entry(0, 1, "Número de Pinos:", "tolerance")
-            add_entry(0, 2, "Encapsulamento:", "component_type")
-            
-        elif category == "MOSFET":
-            add_entry(0, 0, "VDS Máx (ex: 60V):", "voltage")
-            add_entry(0, 1, "ID Máx (ex: 30A):", "tolerance")
-            add_combo(0, 2, "Tipo Canal:", "component_type", ["Canal N", "Canal P"])
-            
-        elif category == "IGBT":
-            add_entry(0, 0, "VCE Máx (ex: 600V):", "voltage")
-            add_entry(0, 1, "IC Máx (ex: 40A):", "tolerance")
             add_entry(0, 2, "Encapsulamento:", "component_type")
             
         elif category == "Optoacoplador":
@@ -1166,9 +1156,9 @@ class SearchFrame(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
-        self.title("Sistema de Inventário Paramétrico de Componentes")
-        self.geometry("1100x700")
+        # Configure window
+        self.title("Inventário de Componentes")
+        self.geometry("1400x800")
         
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
