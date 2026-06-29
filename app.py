@@ -818,11 +818,17 @@ class CategoryUIBuilder:
         tolerance = ""
         comp_type = ""
 
-        # Helper to safely get value from CTkEntry or StringVar
+        # Helper to safely get value from CTkEntry or StringVar with robust fallbacks
         def get_val(key):
-            if key in inputs:
-                val = inputs[key].get().strip()
-                return val
+            possible_keys = [key]
+            if key == "raw_value": possible_keys.extend(["valor", "Valor", "value"])
+            elif key == "tolerance": possible_keys.extend(["tolerancia", "Tolerância", "tolerância"])
+            elif key == "component_type": possible_keys.extend(["encapsulamento", "Encapsulamento", "tipo", "Tipo"])
+            
+            for k in possible_keys:
+                if k in inputs:
+                    val = inputs[k].get().strip()
+                    return val
             return ""
 
         if category == "Resistor PTH":
@@ -1559,16 +1565,37 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             
             cat_config = getattr(self, "cat_logic_map", {}).get(comp[2], {"logic_type": "Outros", "fields": "[]"})
             
-            # Helper to set value safely inside dynamic_inputs
+            # Helper to set value safely inside dynamic_inputs with robust fallbacks
             import tkinter as tk
             def set_val(key, val):
-                var = self.dynamic_inputs.get(key)
+                possible_keys = [key]
+                if key in ["raw_value", "valor", "Valor", "value"]:
+                    possible_keys.extend(["raw_value", "valor", "Valor", "value"])
+                elif key in ["tolerance", "tolerancia", "Tolerância", "tolerância"]:
+                    possible_keys.extend(["tolerance", "tolerancia", "Tolerância", "tolerância"])
+                elif key in ["component_type", "encapsulamento", "Encapsulamento", "tipo", "Tipo"]:
+                    possible_keys.extend(["component_type", "encapsulamento", "Encapsulamento", "tipo", "Tipo"])
+                
+                var = None
+                for k in possible_keys:
+                    if k in self.dynamic_inputs:
+                        var = self.dynamic_inputs[k]
+                        break
+                        
                 if var:
                     if isinstance(var, ctk.StringVar): 
                         var.set(str(val))
                     elif isinstance(var, ctk.CTkEntry):
                         var.delete(0, tk.END)
                         var.insert(0, str(val))
+                        
+            properties_dict = {
+                "raw_value": comp[3] if comp[3] else "",
+                "voltage": comp[4] if comp[4] else "",
+                "tolerance": comp[5] if comp[5] else "",
+                "component_type": comp[6] if comp[6] else ""
+            }
+            print(f"DEBUG - Loaded Properties from DB: {properties_dict}")
 
             logic_type = cat_config.get("logic_type", "Outros")
             c_raw = comp[3] if comp[3] else ""
