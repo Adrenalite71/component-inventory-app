@@ -99,7 +99,8 @@ class DatabaseHelper:
             c.execute("ALTER TABLE categories ADD COLUMN fields_json TEXT DEFAULT '[]'")
 
         c.execute("SELECT count(*) FROM categories")
-        if c.fetchone()[0] == 0:
+        row = c.fetchone()
+        if row and row[0] == 0:
             for cat in CATEGORIES:
                 c.execute(
                     "INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)",
@@ -779,7 +780,8 @@ class CategoryManagerWindow(ctk.CTkToplevel):
         conn = DatabaseHelper.get_connection()
         c = conn.cursor()
         c.execute("SELECT count(*) FROM components WHERE category = ?", (name,))
-        count = c.fetchone()[0]
+        row = c.fetchone()
+        count = row[0] if row else 0
 
         if count > 0:
             messagebox.showerror(
@@ -973,7 +975,8 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
                 c.execute(
                     "SELECT count(*) FROM subdivisions WHERE drawer_code = ?", (code,)
                 )
-                current_subs = c.fetchone()[0]
+                row1 = c.fetchone()
+                current_subs = row1[0] if row1 else 0
 
                 if capacity > current_subs:
                     for i in range(current_subs + 1, capacity + 1):
@@ -990,7 +993,8 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
                     """,
                         (code, capacity),
                     )
-                    if c.fetchone()[0] > 0:
+                    row2 = c.fetchone()
+                    if row2 and row2[0] > 0:
                         messagebox.showerror(
                             "Erro",
                             "Existem componentes nas divisões que seriam removidas. Por favor, mova ou exclua esses componentes antes de reduzir a capacidade.",

@@ -2,6 +2,7 @@ import sqlite3
 import json
 import threading
 import urllib.request
+import urllib.error
 import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import pandas as pd

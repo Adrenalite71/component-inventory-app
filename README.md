@@ -4,10 +4,11 @@ Uma aplicação desktop poderosa e intuitiva desenvolvida para organizar, gerenc
 
 ## Funcionalidades
 
-- **Busca Paramétrica:** Encontre componentes rapidamente filtrando por categoria, localização, valores exatos ou propriedades específicas.
-- **Calculadora de Código de Cores:** Avaliação automática e nativa para Resistores PTH, convertendo a seleção de faixas de cores diretamente para o valor final de engenharia (ex: `220Ω 5%`).
-- **Subdivisões Dinâmicas de Gavetas:** Controle total sobre o seu armazenamento físico. Adicione, edite ou exclua gavetas com quantidades ilimitadas e flexíveis de subdivisões.
-- **Persistência de Dados Offline:** Todo o inventário é salvo de forma segura e local no seu computador, garantindo total privacidade e funcionamento sem necessidade de internet.
+- **Busca Paramétrica Avançada:** Encontre componentes rapidamente filtrando por categoria, localização física, valores exatos ou propriedades específicas.
+- **Sincronização em Rede Local (LAN):** Projetado para ambientes de trabalho reais. O sistema possui arquitetura embutida para operar em modo **Servidor (Host)** ou **Cliente**, permitindo que múltiplos computadores na mesma oficina compartilhem e atualizem o mesmo banco de dados em tempo real.
+- **Calculadoras Integradas Bidirecionais:** Ferramentas nativas para decodificação rápida direto na bancada. Inclui calculadora bidirecional inteligente para Resistores PTH (Cores ↔ Valores) e decodificadores automáticos de códigos alfanuméricos para Resistores SMD e Capacitores SMD.
+- **Subdivisões Dinâmicas de Gavetas:** Controle total sobre o seu armazenamento físico. Adicione, edite ou exclua gavetas com quantidades ilimitadas e flexíveis de subdivisões. O preenchimento automático sincroniza dados e cores nativamente ao editar.
+- **Privacidade e Persistência de Dados:** Todo o inventário é salvo de forma segura (SQLite), operando de forma 100% offline no modo local ou centralizado com segurança na sua própria rede.
 
 ## Como Baixar e Usar
 
