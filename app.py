@@ -1711,6 +1711,29 @@ class SearchFrame(ctk.CTkFrame):
         )
         self.tree.configure(yscroll=self.scrollbar.set)
         self.scrollbar.pack(side="right", fill="y", pady=5)
+        
+        self.btn_adjust = ctk.CTkButton(self, text="Ajustar Estoque Selecionado", command=self.quick_adjust_stock)
+        self.btn_adjust.pack(pady=(0, 10))
+        
+        self.tree.bind("<Double-1>", lambda e: self.quick_adjust_stock())
+
+    def quick_adjust_stock(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um componente na tabela primeiro.")
+            return
+            
+        item = selected[0]
+        tags = self.tree.item(item, "tags")
+        if not tags:
+            return
+            
+        comp_id = tags[0]
+        values = self.tree.item(item, "values")
+        comp_name = values[0]
+        current_qty = int(values[6])
+        
+        StockAdjustmentModal(self, comp_id, comp_name, current_qty, self.search_components)
 
     def update_categories(self):
         rows = DatabaseHelper.get_categories()
@@ -1872,6 +1895,7 @@ class SearchFrame(ctk.CTkFrame):
                                 str(row["quantity"]),
                                 str(row["Location"]),
                             ),
+                            tags=(str(row["id"]),)
                         )
                     except Exception as tree_err:
                         continue
@@ -1883,11 +1907,202 @@ class SearchFrame(ctk.CTkFrame):
                 )
 
 
+class StockAdjustmentModal(ctk.CTkToplevel):
+    def __init__(self, master, comp_id, comp_name, current_qty, callback):
+        super().__init__(master)
+        self.title("Ajustar Estoque")
+        self.geometry("350x250")
+        self.grab_set()
+        
+        self.comp_id = comp_id
+        self.current_qty = current_qty
+        self.callback = callback
+        
+        ctk.CTkLabel(self, text=f"Componente: {comp_name}", font=ctk.CTkFont(weight="bold")).pack(pady=(20, 10))
+        ctk.CTkLabel(self, text=f"Estoque Atual: {current_qty}").pack()
+        
+        self.qty_var = ctk.StringVar(value="0")
+        
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(pady=15)
+        
+        btn_minus = ctk.CTkButton(frame, text="-1", width=40, command=lambda: self.adjust_var(-1))
+        btn_minus.grid(row=0, column=0, padx=5)
+        
+        self.entry = ctk.CTkEntry(frame, textvariable=self.qty_var, width=60, justify="center")
+        self.entry.grid(row=0, column=1, padx=5)
+        
+        btn_plus = ctk.CTkButton(frame, text="+1", width=40, command=lambda: self.adjust_var(1))
+        btn_plus.grid(row=0, column=2, padx=5)
+        
+        btn_confirm = ctk.CTkButton(self, text="Confirmar Ajuste", command=self.save)
+        btn_confirm.pack(pady=10)
+        
+    def adjust_var(self, amount):
+        try:
+            val = int(self.qty_var.get())
+        except:
+            val = 0
+        self.qty_var.set(str(val + amount))
+        
+    def save(self):
+        try:
+            adj = int(self.qty_var.get())
+        except:
+            messagebox.showerror("Erro", "Quantidade inválida.")
+            return
+            
+        if adj == 0:
+            self.destroy()
+            return
+            
+        new_qty = max(0, self.current_qty + adj)
+        
+        conn = DatabaseHelper.get_connection()
+        c = conn.cursor()
+        c.execute("UPDATE components SET quantity = ? WHERE id = ?", (new_qty, self.comp_id))
+        conn.commit()
+        conn.close()
+        
+        self.callback()
+        self.destroy()
+
+class CalculatorsModal(ctk.CTkToplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Calculadoras Eletrônicas")
+        self.geometry("550x400")
+        self.grab_set()
+        
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(expand=True, fill="both", padx=10, pady=10)
+        
+        self.tabview.add("Resistor PTH")
+        self.tabview.add("Resistor SMD")
+        self.tabview.add("Capacitor SMD")
+        
+        self.build_pth_tab()
+        self.build_smd_res_tab()
+        self.build_smd_cap_tab()
+        
+    def build_pth_tab(self):
+        tab = self.tabview.tab("Resistor PTH")
+        
+        top_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        top_frame.pack(pady=10)
+        
+        ctk.CTkLabel(top_frame, text="Bandas:").grid(row=0, column=0, padx=5)
+        self.band_count_var = ctk.StringVar(value="4")
+        menu = ctk.CTkOptionMenu(top_frame, variable=self.band_count_var, values=["4", "5", "6"], width=60, command=self.update_pth_bands)
+        menu.grid(row=0, column=1, padx=5)
+        
+        self.bands_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        self.bands_frame.pack(pady=10)
+        
+        self.band_vars = []
+        self.band_combos = []
+        
+        colors = ["Preto", "Marrom", "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Violeta", "Cinza", "Branco", "Dourado", "Prateado"]
+        
+        for i in range(6):
+            var = ctk.StringVar(value=colors[0])
+            self.band_vars.append(var)
+            cb = ctk.CTkOptionMenu(self.bands_frame, variable=var, values=colors, width=80, command=self.calc_pth)
+            self.band_combos.append(cb)
+            
+        self.result_pth = ctk.CTkLabel(tab, text="-", font=ctk.CTkFont(size=24, weight="bold"))
+        self.result_pth.pack(pady=20)
+        
+        self.update_pth_bands()
+        
+    def update_pth_bands(self, *args):
+        count = int(self.band_count_var.get())
+        
+        digits_colors = ["Preto", "Marrom", "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Violeta", "Cinza", "Branco"]
+        multi_colors = ["Preto", "Marrom", "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Violeta", "Cinza", "Branco", "Dourado", "Prateado"]
+        tol_colors = ["Marrom", "Vermelho", "Verde", "Azul", "Violeta", "Cinza", "Dourado", "Prateado"]
+        temp_colors = ["Marrom", "Vermelho", "Laranja", "Amarelo", "Azul", "Violeta", "Branco"]
+        
+        for i, cb in enumerate(self.band_combos):
+            if i < count:
+                cb.grid(row=0, column=i, padx=2, pady=10)
+                vals = []
+                if count == 4:
+                    if i < 2: vals = digits_colors
+                    elif i == 2: vals = multi_colors
+                    else: vals = tol_colors
+                elif count == 5:
+                    if i < 3: vals = digits_colors
+                    elif i == 3: vals = multi_colors
+                    else: vals = tol_colors
+                elif count == 6:
+                    if i < 3: vals = digits_colors
+                    elif i == 3: vals = multi_colors
+                    elif i == 4: vals = tol_colors
+                    else: vals = temp_colors
+                    
+                cb.configure(values=vals)
+                if cb.get() not in vals:
+                    cb.set(vals[0] if vals else "")
+            else:
+                cb.grid_forget()
+        self.calc_pth()
+        
+    def calc_pth(self, *args):
+        count = int(self.band_count_var.get())
+        bands = [v.get() for v in self.band_vars[:count]]
+        res = PTHResistorCalculator.calculate(bands)
+        self.result_pth.configure(text=res if res else "Inválido")
+        
+    def build_smd_res_tab(self):
+        tab = self.tabview.tab("Resistor SMD")
+        ctk.CTkLabel(tab, text="Código SMD (ex: 103, 4R7):").pack(pady=(20, 5))
+        
+        var = ctk.StringVar()
+        entry = ctk.CTkEntry(tab, textvariable=var, width=150, justify="center")
+        entry.pack(pady=5)
+        
+        result_lbl = ctk.CTkLabel(tab, text="-", font=ctk.CTkFont(size=24, weight="bold"))
+        result_lbl.pack(pady=20)
+        
+        def calc(*args):
+            val, tol = SMDDecoder.decode_resistor_smd(var.get())
+            if val is not None:
+                res = SMDDecoder.format_resistance(val)
+                result_lbl.configure(text=f"{res} {tol if tol else ''}".strip())
+            else:
+                result_lbl.configure(text="Inválido")
+                
+        var.trace_add("write", calc)
+        
+    def build_smd_cap_tab(self):
+        tab = self.tabview.tab("Capacitor SMD")
+        ctk.CTkLabel(tab, text="Código SMD (ex: 104, 476):").pack(pady=(20, 5))
+        
+        var = ctk.StringVar()
+        entry = ctk.CTkEntry(tab, textvariable=var, width=150, justify="center")
+        entry.pack(pady=5)
+        
+        result_lbl = ctk.CTkLabel(tab, text="-", font=ctk.CTkFont(size=24, weight="bold"))
+        result_lbl.pack(pady=20)
+        
+        def calc(*args):
+            val, v = SMDDecoder.decode_capacitor_smd(var.get())
+            if val is not None:
+                res = SMDDecoder.format_capacitance(val)
+                result_lbl.configure(text=f"{res} {v if v else ''}".strip())
+            else:
+                result_lbl.configure(text="Inválido")
+                
+        var.trace_add("write", calc)
+
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.3")
+        self.title("Inventário de Componentes v1.0.4")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -1928,6 +2143,15 @@ class App(ctk.CTk):
             command=self.show_category_manager,
         )
         self.btn_manage_cat.grid(row=4, column=0, padx=20, pady=10)
+        
+        self.btn_calculators = ctk.CTkButton(
+            self.sidebar,
+            text="Calculadoras",
+            command=self.show_calculators,
+            fg_color="#8B0000",
+            hover_color="#A52A2A"
+        )
+        self.btn_calculators.grid(row=5, column=0, padx=20, pady=(10, 30), sticky="s")
 
         self.drawer_frame = DrawerRegistrationFrame(self)
         self.comp_frame = ComponentRegistrationFrame(self)
@@ -1938,6 +2162,9 @@ class App(ctk.CTk):
 
     def show_category_manager(self):
         CategoryManagerWindow(self, self.on_categories_updated)
+
+    def show_calculators(self):
+        CalculatorsModal(self)
 
     def on_categories_updated(self):
         if hasattr(self, "comp_frame"):
