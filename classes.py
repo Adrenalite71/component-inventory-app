@@ -1,3 +1,4 @@
+import customtkinter as ctk
 import json
 import os
 
@@ -15,6 +16,15 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.8
+* Sincronização bidirecional e tradutor automático de cores e valores para resistores.
+
+## v1.0.7
+* Correção do ciclo de estado (abas) para o Resistor PTH.
+
+## v1.0.6
+* Hotfix de carregamento de dados em campos de texto.
+
 ## v1.0.5
 * Correção de carregamento de dados nas gavetas (edição de componentes agora preenche os dados corretamente).
 * Sincronização corrigida na tela de pesquisa paramétrica.
