@@ -64,6 +64,7 @@ class DatabaseHelper:
                 normalized_base_value REAL,
                 quantity INTEGER DEFAULT 0,
                 subdivision_id INTEGER,
+                properties TEXT DEFAULT '{}',
                 FOREIGN KEY(subdivision_id) REFERENCES subdivisions(id)
             )
         """)
@@ -78,6 +79,8 @@ class DatabaseHelper:
             c.execute("ALTER TABLE components ADD COLUMN tolerance TEXT")
         if "component_type" not in existing_columns:
             c.execute("ALTER TABLE components ADD COLUMN component_type TEXT")
+        if "properties" not in existing_columns:
+            c.execute("ALTER TABLE components ADD COLUMN properties TEXT DEFAULT '{}'")
 
         c.execute("""
             CREATE TABLE IF NOT EXISTS categories (
@@ -817,6 +820,7 @@ class CategoryUIBuilder:
         voltage = ""
         tolerance = ""
         comp_type = ""
+        properties = {}
 
         # Helper to safely get value from CTkEntry or StringVar with robust fallbacks
         def get_val(key):
@@ -837,11 +841,13 @@ class CategoryUIBuilder:
                 raw_val = get_val("raw_value")
                 tolerance = get_val("tolerance")
                 comp_type = get_val("component_type")
+                properties["modo_insercao"] = "direta"
             elif method == "Cores (Bandas)":
                 count = int(get_val("r_band_count") or 4)
                 bands = [var.get() for var in inputs.get("r_bands", [])[:count]]
                 raw_val = "CORES: " + "-".join([b for b in bands if b])
                 comp_type = get_val("component_type")
+                properties["modo_insercao"] = "cores"
 
         elif category == "Transistor":
             tipo = get_val("transistor_tipo")
@@ -858,7 +864,7 @@ class CategoryUIBuilder:
             tolerance = get_val("tolerance")
             comp_type = get_val("component_type")
 
-        return raw_val, voltage, tolerance, comp_type
+        return raw_val, voltage, tolerance, comp_type, properties
 
 
 class CategoryEditorDialog(ctk.CTkToplevel):
@@ -1550,7 +1556,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             
         conn = DatabaseHelper.get_connection()
         c = conn.cursor()
-        c.execute("SELECT name, quantity, category, raw_value, voltage, tolerance, component_type FROM components WHERE id = ?", (comp_id,))
+        c.execute("SELECT name, quantity, category, raw_value, voltage, tolerance, component_type, properties FROM components WHERE id = ?", (comp_id,))
         comp = c.fetchone()
         conn.close()
         
@@ -1567,7 +1573,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             
             # Helper to set value safely inside dynamic_inputs with robust fallbacks
             import tkinter as tk
-            def set_val(key, val):
+            def set_val(key, val, force_combo=False, force_entry=False):
                 possible_keys = [key]
                 if key in ["raw_value", "valor", "Valor", "value"]:
                     possible_keys.extend(["raw_value", "valor", "Valor", "value"])
@@ -1583,17 +1589,31 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                         break
                         
                 if var:
-                    if isinstance(var, ctk.StringVar): 
+                    if force_combo and isinstance(var, ctk.StringVar):
                         var.set(str(val))
-                    elif isinstance(var, ctk.CTkEntry):
+                    elif force_entry and isinstance(var, ctk.CTkEntry):
                         var.delete(0, tk.END)
                         var.insert(0, str(val))
+                    elif not force_combo and not force_entry:
+                        if isinstance(var, ctk.StringVar): 
+                            var.set(str(val))
+                        elif isinstance(var, ctk.CTkEntry):
+                            var.delete(0, tk.END)
+                            var.insert(0, str(val))
+
+            props_str = comp[7] if len(comp) > 7 and comp[7] else "{}"
+            try:
+                import json
+                properties = json.loads(props_str)
+            except Exception:
+                properties = {}
                         
             properties_dict = {
                 "raw_value": comp[3] if comp[3] else "",
                 "voltage": comp[4] if comp[4] else "",
                 "tolerance": comp[5] if comp[5] else "",
-                "component_type": comp[6] if comp[6] else ""
+                "component_type": comp[6] if comp[6] else "",
+                "properties": properties
             }
             print(f"DEBUG - Loaded Properties from DB: {properties_dict}")
 
@@ -1604,17 +1624,15 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             c_type = comp[6] if comp[6] else ""
             
             if logic_type == "Resistor PTH":
-                if "CORES:" in c_raw:
+                modo = properties.get("modo_insercao")
+                if not modo:
+                    if "CORES:" in c_raw:
+                        modo = "cores"
+                    else:
+                        modo = "direta"
+                
+                if modo == "cores":
                     set_val("r_method", "Cores (Bandas)")
-                    # We must manually trigger the callback for the segmented button
-                    # CategoryUIBuilder sets the segmented button command internally, 
-                    # but we can simulate the toggle by calling the inner method if we had access.
-                    # Since we don't, we can just trigger it using event generation if it was a standard widget.
-                    # CTkSegmentedButton doesn't support easy programmatic trigger.
-                    # But wait! We can just call it through self.dynamic_frame's children!
-                    # Actually, the simplest way is to pass initial_values dict to CategoryUIBuilder!
-                    # But modifying CategoryUIBuilder is risky.
-                    # Let's just find the segmented button and call its _command.
                     for widget in self.dynamic_frame.winfo_children():
                         if isinstance(widget, ctk.CTkSegmentedButton):
                             if widget._command:
@@ -1625,9 +1643,8 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     bands = colors_str.split("-")
                     set_val("r_band_count", str(len(bands)))
                     
-                    # Update visible bands
                     for widget in self.dynamic_frame.winfo_children():
-                        if isinstance(widget, ctk.CTkFrame): # bands_frame is a child
+                        if isinstance(widget, ctk.CTkFrame):
                             for child in widget.winfo_children():
                                 if isinstance(child, ctk.CTkOptionMenu) and child.cget("values") == ["4", "5", "6"]:
                                     if child._command:
@@ -1639,7 +1656,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                         if i < len(band_vars):
                             band_vars[i].set(color)
                     
-                    set_val("component_type", c_type)
+                    set_val("component_type", c_type, force_combo=True)
                 else:
                     set_val("r_method", "Entrada Direta")
                     for widget in self.dynamic_frame.winfo_children():
@@ -1647,9 +1664,9 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                             if widget._command:
                                 widget._command("Entrada Direta")
                             break
-                    set_val("raw_value", c_raw)
-                    set_val("tolerance", c_tol)
-                    set_val("component_type", c_type)
+                    set_val("raw_value", c_raw, force_entry=True)
+                    set_val("tolerance", c_tol, force_entry=True)
+                    set_val("component_type", c_type, force_entry=True)
                     
             elif logic_type == "Transistor":
                 # Raw value format: "BJT (NPN)"
@@ -1733,7 +1750,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         cat_config = getattr(self, "cat_logic_map", {}).get(
             category, {"logic_type": "Outros", "fields": "[]"}
         )
-        raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(
+        raw_val, voltage, tolerance, comp_type, properties = CategoryUIBuilder.extract_values(
             cat_config, self.dynamic_inputs
         )
 
@@ -1763,8 +1780,8 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             c.execute(
                 """
                 INSERT INTO components 
-                (name, category, raw_value, quantity, voltage, tolerance, component_type, subdivision_id, normalized_base_value)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (name, category, raw_value, quantity, voltage, tolerance, component_type, subdivision_id, normalized_base_value, properties)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     name,
@@ -1776,6 +1793,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     comp_type,
                     subdivision_id,
                     normalized_val,
+                    json.dumps(properties),
                 ),
             )
             conn.commit()
@@ -1974,7 +1992,7 @@ class SearchFrame(ctk.CTkFrame):
             cat_config = getattr(self, "cat_logic_map", {}).get(
                 category, {"logic_type": "Outros", "fields": "[]"}
             )
-            raw_val, voltage, tolerance, comp_type = CategoryUIBuilder.extract_values(
+            raw_val, voltage, tolerance, comp_type, _ = CategoryUIBuilder.extract_values(
                 cat_config, self.dynamic_inputs
             )
 
@@ -2289,6 +2307,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.7
+* Correção da regressão na tela de carregamento de Resistor PTH para garantir injeção de dados guiada pelo estado de aba (cores ou direta).
+
 ## v1.0.6
 * Correção no carregamento profundo de dados. Parâmetros específicos (como valores e cores) agora são exibidos corretamente ao editar um componente.
 
@@ -2316,7 +2337,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.6")
+        self.title("Inventário de Componentes v1.0.7")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2389,7 +2410,7 @@ class App(ctk.CTk):
         import json
         import os
         settings_path = "settings.json"
-        current_version = "1.0.6"
+        current_version = "1.0.7"
         last_seen = "1.0.0"
         
         if os.path.exists(settings_path):
