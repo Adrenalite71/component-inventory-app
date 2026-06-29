@@ -1,3 +1,4 @@
+from classes import SMDDecoder, PTHResistorCalculator, PTHResistorReverseParser
 import sqlite3
 
 # pyrefly: ignore [missing-import]
@@ -123,362 +124,10 @@ class DatabaseHelper:
         return sqlite3.connect(DB_FILE)
 
 
-class SMDDecoder:
-    EIA96_MULTIPLIERS = {
-        "Z": 0.001,
-        "Y": 0.01,
-        "R": 0.01,
-        "X": 0.1,
-        "S": 0.1,
-        "A": 1,
-        "B": 10,
-        "C": 100,
-        "D": 1000,
-        "E": 10000,
-        "F": 100000,
-    }
-
-    EIA96_VALUES = [
-        100,
-        102,
-        105,
-        107,
-        110,
-        113,
-        115,
-        118,
-        121,
-        124,
-        127,
-        130,
-        133,
-        137,
-        140,
-        143,
-        147,
-        150,
-        154,
-        158,
-        162,
-        165,
-        169,
-        174,
-        178,
-        182,
-        187,
-        191,
-        196,
-        200,
-        205,
-        210,
-        215,
-        221,
-        226,
-        232,
-        237,
-        243,
-        249,
-        255,
-        261,
-        267,
-        274,
-        280,
-        287,
-        294,
-        301,
-        309,
-        316,
-        324,
-        332,
-        340,
-        348,
-        357,
-        365,
-        374,
-        383,
-        392,
-        402,
-        412,
-        422,
-        432,
-        442,
-        453,
-        464,
-        475,
-        487,
-        499,
-        511,
-        523,
-        536,
-        549,
-        562,
-        576,
-        590,
-        604,
-        619,
-        634,
-        649,
-        665,
-        681,
-        698,
-        715,
-        732,
-        750,
-        768,
-        787,
-        806,
-        825,
-        845,
-        866,
-        887,
-        909,
-        931,
-        953,
-        976,
-    ]
-
-    CAP_VOLTAGE_CODES = {
-        "e": 2.5,
-        "G": 4,
-        "J": 6.3,
-        "A": 10,
-        "C": 16,
-        "D": 20,
-        "E": 25,
-        "V": 35,
-        "H": 50,
-        "T": 63,
-        "x": 63,
-    }
-
-    @staticmethod
-    def decode_resistor_smd(code):
-        code = code.strip().upper()
-
-        if "R" in code:
-            try:
-                val = float(code.replace("R", "."))
-                return val, None
-            except ValueError:
-                pass
-
-        match_eia96 = re.match(r"^(\d{2})([A-Z])$", code)
-        if match_eia96:
-            code_num = int(match_eia96.group(1))
-            multiplier = match_eia96.group(2)
-            if 1 <= code_num <= 96 and multiplier in SMDDecoder.EIA96_MULTIPLIERS:
-                val = (
-                    SMDDecoder.EIA96_VALUES[code_num - 1]
-                    * SMDDecoder.EIA96_MULTIPLIERS[multiplier]
-                )
-                return float(val), "1%"
-
-        match_digits = re.match(r"^(\d+)(\d)$", code)
-        if match_digits:
-            base = int(match_digits.group(1))
-            mult = int(match_digits.group(2))
-            val = base * (10**mult)
-            tol = "5%" if len(code) == 3 else "1%"
-            return float(val), tol
-
-        return None, None
-
-    @staticmethod
-    def decode_capacitor_smd(code):
-        code = code.strip()
-
-        match_explicit = re.search(
-            r"^([\d\.]+)\s*(uF|u|nF|n|pF|p|mF|m)?\s*[\s,]*(\d+)\s*V$",
-            code,
-            re.IGNORECASE,
-        )
-        if match_explicit:
-            val = float(match_explicit.group(1))
-            unit = (match_explicit.group(2) or "").lower()
-            voltage = f"{match_explicit.group(3)}V"
-
-            if "p" in unit:
-                val *= 1e-12
-            elif "n" in unit:
-                val *= 1e-9
-            elif "m" in unit:
-                val *= 1e-3
-            else:
-                val *= 1e-6
-
-            return val, voltage
-
-        match_letter = re.match(r"^([a-zA-Z])(\d{2})(\d)$", code)
-        if match_letter:
-            letter = match_letter.group(1)
-            if letter not in SMDDecoder.CAP_VOLTAGE_CODES:
-                letter = letter.upper()
-
-            voltage = None
-            if letter in SMDDecoder.CAP_VOLTAGE_CODES:
-                voltage = f"{SMDDecoder.CAP_VOLTAGE_CODES[letter]}V"
-
-            base = int(match_letter.group(2))
-            mult = int(match_letter.group(3))
-
-            val_pf = base * (10**mult)
-            val = val_pf * 1e-12
-            return val, voltage
-
-        match_3digit = re.match(r"^(\d{2})(\d)$", code)
-        if match_3digit:
-            base = int(match_3digit.group(1))
-            mult = int(match_3digit.group(2))
-            val_pf = base * (10**mult)
-            val = val_pf * 1e-12
-            return val, None
-
-        return None, None
-
-    @staticmethod
-    def parse_search_query(query):
-        """Converts human readable '10k', '100n' into numeric values."""
-        query = query.strip().replace(",", ".")
-
-        if "R" in query.upper() and not re.search(r"[a-qs-zA-QS-Z]", query):
-            try:
-                return float(query.upper().replace("R", "."))
-            except:
-                pass
-
-        match = re.match(
-            r"^([\d\.]+)\s*(p|n|u|m|M|k|K|G)?([fF]|ohms|ohm|Ohm|R)?$", query
-        )
-        if match:
-            try:
-                val = float(match.group(1))
-                mult = match.group(2)
-
-                if mult == "p":
-                    val *= 1e-12
-                elif mult == "n":
-                    val *= 1e-9
-                elif mult in ("u", "U"):
-                    val *= 1e-6
-                elif mult == "m":
-                    val *= 1e-3
-                elif mult in ("k", "K"):
-                    val *= 1e3
-                elif mult == "M":
-                    val *= 1e6
-                elif mult == "G":
-                    val *= 1e9
-
-                return val
-            except ValueError:
-                pass
-
-        return None
-
-    @staticmethod
-    def format_resistance(val):
-        if val is None or pd.isna(val) or val == "":
-            return ""
-        val = float(val)
-        if val >= 1e6:
-            return f"{val/1e6:g}MΩ"
-        if val >= 1e3:
-            return f"{val/1e3:g}kΩ"
-        return f"{val:g}Ω"
-
-    @staticmethod
-    def format_capacitance(val):
-        if val is None or pd.isna(val) or val == "":
-            return ""
-        val = float(val)
-        if val >= 1e-3:
-            return f"{val/1e-3:g}mF"
-        if val >= 1e-6:
-            return f"{val/1e-6:g}µF"
-        if val >= 1e-9:
-            return f"{val/1e-9:g}nF"
-        return f"{val/1e-12:g}pF"
 
 
-class PTHResistorCalculator:
-    DIGITS = {
-        "Preto": 0,
-        "Marrom": 1,
-        "Vermelho": 2,
-        "Laranja": 3,
-        "Amarelo": 4,
-        "Verde": 5,
-        "Azul": 6,
-        "Violeta": 7,
-        "Cinza": 8,
-        "Branco": 9,
-    }
-    MULTIPLIERS = {
-        "Preto": 1,
-        "Marrom": 10,
-        "Vermelho": 100,
-        "Laranja": 1000,
-        "Amarelo": 10000,
-        "Verde": 100000,
-        "Azul": 1000000,
-        "Violeta": 10000000,
-        "Cinza": 100000000,
-        "Branco": 1000000000,
-        "Dourado": 0.1,
-        "Prateado": 0.01,
-    }
-    TOLERANCES = {
-        "Marrom": "1%",
-        "Vermelho": "2%",
-        "Verde": "0.5%",
-        "Azul": "0.25%",
-        "Violeta": "0.1%",
-        "Cinza": "0.05%",
-        "Dourado": "5%",
-        "Prateado": "10%",
-    }
-    TEMP_COEFFS = {
-        "Marrom": "100ppm",
-        "Vermelho": "50ppm",
-        "Laranja": "15ppm",
-        "Amarelo": "25ppm",
-        "Azul": "10ppm",
-        "Violeta": "5ppm",
-        "Branco": "1ppm",
-    }
 
-    @staticmethod
-    def calculate(bands):
-        if not bands:
-            return ""
-        try:
-            if len(bands) == 4:
-                val = (
-                    PTHResistorCalculator.DIGITS[bands[0]] * 10
-                    + PTHResistorCalculator.DIGITS[bands[1]]
-                ) * PTHResistorCalculator.MULTIPLIERS[bands[2]]
-                tol = PTHResistorCalculator.TOLERANCES.get(bands[3], "")
-                return f"{SMDDecoder.format_resistance(val)} {tol}".strip()
-            elif len(bands) == 5:
-                val = (
-                    PTHResistorCalculator.DIGITS[bands[0]] * 100
-                    + PTHResistorCalculator.DIGITS[bands[1]] * 10
-                    + PTHResistorCalculator.DIGITS[bands[2]]
-                ) * PTHResistorCalculator.MULTIPLIERS[bands[3]]
-                tol = PTHResistorCalculator.TOLERANCES.get(bands[4], "")
-                return f"{SMDDecoder.format_resistance(val)} {tol}".strip()
-            elif len(bands) == 6:
-                val = (
-                    PTHResistorCalculator.DIGITS[bands[0]] * 100
-                    + PTHResistorCalculator.DIGITS[bands[1]] * 10
-                    + PTHResistorCalculator.DIGITS[bands[2]]
-                ) * PTHResistorCalculator.MULTIPLIERS[bands[3]]
-                tol = PTHResistorCalculator.TOLERANCES.get(bands[4], "")
-                tc = PTHResistorCalculator.TEMP_COEFFS.get(bands[5], "")
-                return f"{SMDDecoder.format_resistance(val)} {tol} {tc}".strip()
-            return ""
-        except KeyError:
-            return ""
+
 
 
 class CategoryUIBuilder:
@@ -935,6 +584,7 @@ class CategoryEditorDialog(ctk.CTkToplevel):
             return
         fields = [e.get().strip() for e in self.fields_entries if e.get().strip()]
         import json
+
 
         self.result = (name, json.dumps(fields))
         self.destroy()
@@ -1656,6 +1306,15 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                         if i < len(band_vars):
                             band_vars[i].set(color)
                     
+                    # Bidirectional Sync: calculate text equivalent and populate text fields
+                    calc_str = PTHResistorCalculator.calculate(bands)
+                    parts = calc_str.split(" ", 1)
+                    val_str = parts[0] if len(parts) > 0 else ""
+                    tol_str = parts[1] if len(parts) > 1 else ""
+                    
+                    set_val("raw_value", val_str, force_entry=True)
+                    set_val("tolerance", tol_str, force_entry=True)
+                    set_val("component_type", c_type, force_entry=True)
                     set_val("component_type", c_type, force_combo=True)
                 else:
                     set_val("r_method", "Entrada Direta")
@@ -1667,6 +1326,23 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     set_val("raw_value", c_raw, force_entry=True)
                     set_val("tolerance", c_tol, force_entry=True)
                     set_val("component_type", c_type, force_entry=True)
+                    set_val("component_type", c_type, force_combo=True)
+                    
+                    # Bidirectional Sync: calculate bands and populate comboboxes
+                    bands = PTHResistorReverseParser.get_bands(c_raw, c_tol)
+                    if bands:
+                        set_val("r_band_count", str(len(bands)))
+                        for widget in self.dynamic_frame.winfo_children():
+                            if isinstance(widget, ctk.CTkFrame):
+                                for child in widget.winfo_children():
+                                    if isinstance(child, ctk.CTkOptionMenu) and child.cget("values") == ["4", "5", "6"]:
+                                        if child._command:
+                                            child._command(str(len(bands)))
+                                        break
+                        band_vars = self.dynamic_inputs.get("r_bands", [])
+                        for i, color in enumerate(bands):
+                            if i < len(band_vars):
+                                band_vars[i].set(color)
                     
             elif logic_type == "Transistor":
                 # Raw value format: "BJT (NPN)"
@@ -2307,6 +1983,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         textbox.pack(expand=True, fill="both", padx=20, pady=(0, 20))
         
         changelog = """
+## v1.0.8
+* Implementação de sincronização bidirecional na tela de registro do Resistor PTH e cálculo de cores a partir de valores manuais via parser de engenharia reverso.
+
 ## v1.0.7
 * Correção da regressão na tela de carregamento de Resistor PTH para garantir injeção de dados guiada pelo estado de aba (cores ou direta).
 
@@ -2337,7 +2016,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.0.7")
+        self.title("Inventário de Componentes v1.0.8")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2410,7 +2089,7 @@ class App(ctk.CTk):
         import json
         import os
         settings_path = "settings.json"
-        current_version = "1.0.7"
+        current_version = "1.0.8"
         last_seen = "1.0.0"
         
         if os.path.exists(settings_path):
