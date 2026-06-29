@@ -273,14 +273,16 @@ class CategoryUIBuilder:
             inputs[key] = entry
             
         # Helper to add dropdown
-        def add_combo(row, col, label_text, key, values):
-            ctk.CTkLabel(parent_frame, text=label_text).grid(row=row, column=col*2, padx=(10, 5), pady=10, sticky="e")
+        def add_combo(row, col, label_text, key, values, command=None):
+            label = ctk.CTkLabel(parent_frame, text=label_text)
+            label.grid(row=row, column=col*2, padx=(10, 5), pady=10, sticky="e")
             # If search, add empty option at top
             vals = [""] + values if is_search else values
             var = ctk.StringVar(value=vals[0])
-            combo = ctk.CTkOptionMenu(parent_frame, variable=var, values=vals, width=150)
+            combo = ctk.CTkOptionMenu(parent_frame, variable=var, values=vals, width=150, command=command)
             combo.grid(row=row, column=col*2+1, padx=(0, 15), pady=10, sticky="w")
             inputs[key] = var
+            return combo, label
 
         if category == "Resistor PTH":
             # For PTH Resistors, we implement the Segmented Button toggle
@@ -369,11 +371,42 @@ class CategoryUIBuilder:
             add_entry(0, 2, "Encapsulamento/Tipo:", "component_type")
             
         elif category == "Transistor":
-            add_combo(0, 0, "Tipo:", "transistor_tipo", ["BJT", "MOSFET", "Darlington", "IGBT", "Outro"])
-            add_combo(0, 1, "Polaridade:", "transistor_pol", ["NPN", "PNP", "Canal N", "Canal P", "Outra"])
+            def on_tipo_change(val):
+                if val in ["BJT", "Darlington"]:
+                    pol_label.grid()
+                    pol_combo.grid()
+                    pol_vals = ["NPN", "PNP"]
+                    if is_search: pol_vals.insert(0, "")
+                    pol_combo.configure(values=pol_vals)
+                    if inputs["transistor_pol"].get() not in pol_vals:
+                        inputs["transistor_pol"].set(pol_vals[0])
+                elif val == "MOSFET":
+                    pol_label.grid()
+                    pol_combo.grid()
+                    pol_vals = ["Canal N", "Canal P"]
+                    if is_search: pol_vals.insert(0, "")
+                    pol_combo.configure(values=pol_vals)
+                    if inputs["transistor_pol"].get() not in pol_vals:
+                        inputs["transistor_pol"].set(pol_vals[0])
+                elif val == "IGBT":
+                    pol_label.grid_remove()
+                    pol_combo.grid_remove()
+                    inputs["transistor_pol"].set("")
+                else: # Outro, empty etc
+                    pol_label.grid()
+                    pol_combo.grid()
+                    pol_vals = ["NPN", "PNP", "Canal N", "Canal P", "Outra"]
+                    if is_search: pol_vals.insert(0, "")
+                    pol_combo.configure(values=pol_vals)
+
+            tipo_combo, tipo_label = add_combo(0, 0, "Tipo:", "transistor_tipo", ["BJT", "MOSFET", "Darlington", "IGBT", "Outro"], command=on_tipo_change)
+            pol_combo, pol_label = add_combo(0, 1, "Polaridade:", "transistor_pol", ["NPN", "PNP", "Canal N", "Canal P", "Outra"])
             add_entry(0, 2, "Encapsulamento:", "component_type")
             add_entry(1, 0, "Tensão Máx (VCEO/VDS):", "voltage")
             add_entry(1, 1, "Corrente Máx (IC/ID):", "tolerance")
+            
+            # Trigger initial state
+            on_tipo_change(inputs["transistor_tipo"].get())
             
         elif category == "Indutor":
             add_entry(0, 0, "Indutância (ex: 10µH):", "raw_value")
