@@ -1218,8 +1218,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         slot_label = self.slot_var.get()
 
         if not name:
-            messagebox.showerror("Erro", "O Nome do Componente é obrigatório.")
-            return
+            name = category
 
         if not qty.isdigit():
             messagebox.showerror("Erro", "A Quantidade deve ser um número inteiro.")
@@ -1459,6 +1458,7 @@ class SearchFrame(ctk.CTkFrame):
             for widget in self.filters_frame.winfo_children():
                 widget.destroy()
             self.dynamic_inputs = {}
+            columns = ("Nome", "Categoria", "Valor/Desc", "Tensão", "Tol/Corrente", "Tipo/Encaps.", "Qtd", "Localização")
         else:
             cat_config = getattr(self, "cat_logic_map", {}).get(
                 category, {"logic_type": "Outros", "fields": "[]"}
@@ -1466,6 +1466,30 @@ class SearchFrame(ctk.CTkFrame):
             self.dynamic_inputs = CategoryUIBuilder.build_fields(
                 self.filters_frame, cat_config, is_search=True
             )
+            
+            fields_str = cat_config.get("fields", "[]")
+            try:
+                import json
+                fields = json.loads(fields_str)
+            except Exception:
+                fields = []
+                
+            custom_cols = []
+            for f in fields:
+                fname = f.get("name") if isinstance(f, dict) else str(f)
+                if fname:
+                    custom_cols.append(fname)
+                    
+            if custom_cols:
+                columns = ["Nome", "Categoria"] + custom_cols + ["Qtd", "Localização"]
+            else:
+                columns = ("Nome", "Categoria", "Valor/Desc", "Tensão", "Tol/Corrente", "Tipo/Encaps.", "Qtd", "Localização")
+                
+        self.tree.delete(*self.tree.get_children())
+        self.tree.configure(columns=columns)
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=110)
 
     def perform_search(self):
         query_text = self.search_entry.get().strip()
@@ -1615,21 +1639,33 @@ class SearchFrame(ctk.CTkFrame):
                             except Exception:
                                 pass
 
-                        self.tree.insert(
-                            "",
-                            "end",
-                            values=(
-                                str(row["name"]),
-                                cat,
-                                raw_val,
-                                voltage,
-                                tolerance,
-                                comp_type,
-                                str(row["quantity"]),
-                                str(row["Location"]),
-                            ),
-                            tags=(str(row["id"]),)
-                        )
+                        try:
+                            props = row.get("properties", "{}")
+                            if isinstance(props, str):
+                                props = json.loads(props) if props and props != "-" else {}
+                            elif not isinstance(props, dict):
+                                props = {}
+                        except Exception:
+                            props = {}
+
+                        active_cols = self.tree["columns"]
+                        row_values = []
+                        for col in active_cols:
+                            if col == "Nome": row_values.append(str(row["name"]))
+                            elif col == "Categoria": row_values.append(cat)
+                            elif col == "Qtd": row_values.append(str(row["quantity"]))
+                            elif col == "Localização": row_values.append(str(row["Location"]))
+                            elif col == "Valor/Desc": row_values.append(raw_val)
+                            elif col == "Tensão": row_values.append(voltage)
+                            elif col == "Tol/Corrente": row_values.append(tolerance)
+                            elif col == "Tipo/Encaps.": row_values.append(comp_type)
+                            else:
+                                val = props.get(col, "-")
+                                if not str(val).strip():
+                                    val = "-"
+                                row_values.append(str(val))
+
+                        self.tree.insert("", "end", values=tuple(row_values), tags=(str(row["id"]),))
                     except Exception as tree_err:
                         continue
             except Exception as e:
