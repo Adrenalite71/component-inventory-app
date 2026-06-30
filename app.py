@@ -903,6 +903,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.name_label.grid(row=2, column=0, padx=20, pady=10, sticky="w")
         self.name_entry = ctk.CTkEntry(self.container, width=300)
         self.name_entry.grid(row=2, column=1, padx=20, pady=10, sticky="w")
+        self.name_entry.bind("<FocusOut>", self.auto_fill_diode)
 
         self.qty_label = ctk.CTkLabel(self.container, text="Quantidade:")
         self.qty_label.grid(row=3, column=0, padx=20, pady=10, sticky="w")
@@ -1203,13 +1204,60 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 elif field_name in ["Encapsulamento", "Tipo"]:
                     set_val(field_name, c_type)
 
+    def auto_fill_diode(self, event=None):
+        if self.cat_var.get() == "Diodo":
+            from component_knowledge import get_semiconductor_specs
+            name = self.name_entry.get().strip()
+            specs = get_semiconductor_specs(name)
+            if specs:
+                if 'Tipo' in specs:
+                    self.diode_tipo_cb.set(specs['Tipo'])
+                if 'Encapsulamento' in specs:
+                    self.diode_encaps_cb.set(specs['Encapsulamento'])
+                if 'Tensão Máx (V)' in specs:
+                    self.diode_tensao_entry.delete(0, "end")
+                    self.diode_tensao_entry.insert(0, specs['Tensão Máx (V)'])
+                if 'Corrente Máx (A)' in specs:
+                    self.diode_corrente_entry.delete(0, "end")
+                    self.diode_corrente_entry.insert(0, specs['Corrente Máx (A)'])
+
+    def draw_diode_fields(self):
+        for widget in self.dynamic_frame.winfo_children():
+            widget.destroy()
+        
+        self.dynamic_inputs = {}
+        
+        ctk.CTkLabel(self.dynamic_frame, text="Tipo:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.diode_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Retificador', 'Schottky', 'Zener', 'Sinal', 'Ponte Retificadora', 'Outro'])
+        self.diode_tipo_cb.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.diode_tipo_cb.set('Retificador')
+
+        ctk.CTkLabel(self.dynamic_frame, text="Encapsulamento:").grid(row=0, column=2, padx=5, pady=5, sticky="e")
+        self.diode_encaps_cb = ctk.CTkComboBox(self.dynamic_frame, values=['DO-41 (PTH)', 'DO-201 (PTH)', 'DO-35 (PTH)', 'SMA (SMD)', 'SMB (SMD)', 'SMC (SMD)', 'SOD-123 (SMD)', 'KBP (PTH)', 'MBS (SMD)', 'Outro'])
+        self.diode_encaps_cb.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+        self.diode_encaps_cb.set('DO-41 (PTH)')
+
+        ctk.CTkLabel(self.dynamic_frame, text="Tensão Máx (V):").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.diode_tensao_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.diode_tensao_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ctk.CTkLabel(self.dynamic_frame, text="Corrente Máx (A):").grid(row=1, column=2, padx=5, pady=5, sticky="e")
+        self.diode_corrente_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.diode_corrente_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+
     def on_category_change(self, category):
-        cat_config = getattr(self, "cat_logic_map", {}).get(
-            category, {"logic_type": "Outros", "fields": "[]"}
-        )
-        self.dynamic_inputs = CategoryUIBuilder.build_fields(
-            self.dynamic_frame, cat_config, is_search=False
-        )
+        for widget in self.dynamic_frame.winfo_children():
+            widget.destroy()
+
+        if category == "Diodo":
+            self.draw_diode_fields()
+        else:
+            cat_config = getattr(self, "cat_logic_map", {}).get(
+                category, {"logic_type": "Outros", "fields": "[]"}
+            )
+            self.dynamic_inputs = CategoryUIBuilder.build_fields(
+                self.dynamic_frame, cat_config, is_search=False
+            )
 
     def save_component(self):
         name = self.name_entry.get().strip()
@@ -1232,15 +1280,28 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         subdivision_id = slot_info["subdivision_id"]
         old_comp_id = slot_info["comp_id"]
 
-        cat_config = getattr(self, "cat_logic_map", {}).get(
-            category, {"logic_type": "Outros", "fields": "[]"}
-        )
-        raw_val, voltage, tolerance, comp_type, properties = CategoryUIBuilder.extract_values(
-            cat_config, self.dynamic_inputs
-        )
-
-        logic_type = cat_config.get("logic_type", "Outros")
-        normalized_val = None
+        if category == "Diodo":
+            raw_val = ""
+            voltage = ""
+            tolerance = ""
+            comp_type = ""
+            properties = {
+                "Tipo": self.diode_tipo_cb.get(),
+                "Encapsulamento": self.diode_encaps_cb.get(),
+                "Tensão Máx (V)": self.diode_tensao_entry.get().strip(),
+                "Corrente Máx (A)": self.diode_corrente_entry.get().strip()
+            }
+            logic_type = "Diodo"
+            normalized_val = None
+        else:
+            cat_config = getattr(self, "cat_logic_map", {}).get(
+                category, {"logic_type": "Outros", "fields": "[]"}
+            )
+            raw_val, voltage, tolerance, comp_type, properties = CategoryUIBuilder.extract_values(
+                cat_config, self.dynamic_inputs
+            )
+            logic_type = cat_config.get("logic_type", "Outros")
+            normalized_val = None
 
         if logic_type == "Resistor SMD" and raw_val:
             val, tol = SMDDecoder.decode_resistor_smd(raw_val)
@@ -1291,42 +1352,6 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                         properties[corrente_key] = specs["current"]
                 else:
                     properties["Corrente"] = specs["current"]
-        if category in ["Diodo", "Ponte Retificadora"]:
-            from component_knowledge import get_semiconductor_specs
-            
-            input_string = name
-            for k, v in properties.items():
-                if k.lower() in ["modelo", "model", "código", "codigo", "part number", "pn", "valor", "descrição"]:
-                    if v:
-                        input_string += " " + str(v)
-            
-            specs = get_semiconductor_specs(input_string)
-            if specs:
-                for spec_key, spec_val in specs.items():
-                    found_key = None
-                    for k in properties.keys():
-                        if k.lower().replace(" ", "") == spec_key.lower().replace(" ", ""):
-                            found_key = k
-                            break
-                        if spec_key == 'Tensão Máx' and k.lower() in ['tensão', 'tensao', 'voltage', 'tensão máx', 'tensao max']:
-                            found_key = k
-                            break
-                        if spec_key == 'Corrente Máx' and k.lower() in ['corrente', 'current', 'corrente máx', 'corrente max']:
-                            found_key = k
-                            break
-                        if spec_key == 'Encapsulamento' and k.lower() in ['encapsulamento', 'tipo/encapsulamento', 'tamanho', 'package']:
-                            found_key = k
-                            break
-                        if spec_key == 'Tipo' and k.lower() in ['tipo', 'função', 'tipo/encapsulamento']:
-                            found_key = k
-                            break
-                            
-                    if found_key:
-                        if not properties[found_key]:
-                            properties[found_key] = spec_val
-                    else:
-                        properties[spec_key] = spec_val
-
         try:
             if old_comp_id:
                 LocalDatabaseManager.execute_query("DELETE FROM components WHERE id = ?", (old_comp_id,))
