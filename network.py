@@ -12,6 +12,7 @@ class RemoteCursor:
         self.host_url = host_url
         self.last_results = []
         self.description = []
+        self.lastrowid = None
     
     def execute(self, sql, params=None):
         data = json.dumps({"sql": sql, "params": params or []}).encode('utf-8')
@@ -24,6 +25,7 @@ class RemoteCursor:
                 self.last_results = resp_data.get("results", [])
                 cols = resp_data.get("columns", [])
                 self.description = [(c,) for c in cols]
+                self.lastrowid = resp_data.get("lastrowid")
         except urllib.error.URLError as e:
             raise Exception(f"Erro de conexão com o servidor: {str(e)}")
     
@@ -73,16 +75,18 @@ class QueryHandler(BaseHTTPRequestHandler):
                     if is_read:
                         results = c.fetchall()
                         columns = [desc[0] for desc in c.description] if c.description else []
+                        lastrowid = None
                     else:
                         conn.commit()
                         results = []
                         columns = []
+                        lastrowid = c.lastrowid
                     conn.close()
                     
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                response = json.dumps({"results": results, "columns": columns})
+                response = json.dumps({"results": results, "columns": columns, "lastrowid": lastrowid})
                 self.wfile.write(response.encode('utf-8'))
             except Exception as e:
                 self.send_response(500)

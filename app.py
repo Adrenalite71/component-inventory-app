@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox
 import pandas as pd
 import traceback
 import re
+import json
 from network import DatabaseManager
 
 DB_FILE = "inventory.db"
@@ -35,7 +36,8 @@ class CategoryUIBuilder:
         fields_json = category_config.get("fields", "[]")
         try:
             custom_fields = json.loads(fields_json)
-        except:
+        except Exception as e:
+            print(f"Error parsing fields JSON in build_fields: {e}")
             custom_fields = []
 
         # Clear frame
@@ -347,9 +349,12 @@ class CategoryUIBuilder:
 
         else:  # Outros
             if custom_fields:
-                for i, field in enumerate(custom_fields):
-                    field_name = field.get("name", f"Campo {i+1}")
-                    add_entry(i // 3, i % 3, field_name + ":", field_name)
+                try:
+                    for i, field in enumerate(custom_fields):
+                        field_name = field.get("name", f"Campo {i+1}") if isinstance(field, dict) else str(field)
+                        add_entry(i // 3, i % 3, field_name + ":", field_name)
+                except Exception as e:
+                    print(f"Error drawing fields: {e}")
             else:
                 add_entry(0, 0, "Descrição / Valor:", "raw_value")
                 add_entry(0, 1, "Tipo / Encapsulamento:", "component_type")
@@ -362,7 +367,8 @@ class CategoryUIBuilder:
         fields_json = category_config.get("fields", "[]")
         try:
             custom_fields = json.loads(fields_json)
-        except:
+        except Exception as e:
+            print(f"Error parsing fields JSON in extract_values: {e}")
             custom_fields = []
 
         """Extract standardized DB values from the dynamic UI widgets"""
@@ -410,10 +416,13 @@ class CategoryUIBuilder:
 
         else:
             if custom_fields:
-                for field in custom_fields:
-                    field_name = field.get("name")
-                    if field_name:
-                        properties[field_name] = get_val(field_name)
+                try:
+                    for field in custom_fields:
+                        field_name = field.get("name") if isinstance(field, dict) else str(field)
+                        if field_name:
+                            properties[field_name] = get_val(field_name)
+                except Exception as e:
+                    print(f"Error extracting custom fields: {e}")
             else:
                 raw_val = get_val("raw_value")
                 voltage = get_val("voltage")
@@ -1177,11 +1186,12 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             import ast
             try:
                 fields = ast.literal_eval(cat_config["fields"])
-            except:
+            except Exception as e:
+                print(f"Error parsing fields JSON in on_slot_select: {e}")
                 fields = []
                 
             for field in fields:
-                field_name = field["name"]
+                field_name = field["name"] if isinstance(field, dict) else str(field)
                 if field_name in properties:
                     set_val(field_name, properties[field_name])
                 elif field_name in ["Código SMD", "Capacitância", "Indutância"]:
@@ -2017,6 +2027,8 @@ class App(ctk.CTk):
 
         self.active_frame = None
         self.show_drawer_frame()
+        
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
         
         self.check_changelog()
 
