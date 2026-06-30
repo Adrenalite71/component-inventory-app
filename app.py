@@ -1291,6 +1291,42 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                         properties[corrente_key] = specs["current"]
                 else:
                     properties["Corrente"] = specs["current"]
+        if category in ["Diodo", "Ponte Retificadora"]:
+            from component_knowledge import get_semiconductor_specs
+            
+            input_string = name
+            for k, v in properties.items():
+                if k.lower() in ["modelo", "model", "código", "codigo", "part number", "pn", "valor", "descrição"]:
+                    if v:
+                        input_string += " " + str(v)
+            
+            specs = get_semiconductor_specs(input_string)
+            if specs:
+                for spec_key, spec_val in specs.items():
+                    found_key = None
+                    for k in properties.keys():
+                        if k.lower().replace(" ", "") == spec_key.lower().replace(" ", ""):
+                            found_key = k
+                            break
+                        if spec_key == 'Tensão Máx' and k.lower() in ['tensão', 'tensao', 'voltage', 'tensão máx', 'tensao max']:
+                            found_key = k
+                            break
+                        if spec_key == 'Corrente Máx' and k.lower() in ['corrente', 'current', 'corrente máx', 'corrente max']:
+                            found_key = k
+                            break
+                        if spec_key == 'Encapsulamento' and k.lower() in ['encapsulamento', 'tipo/encapsulamento', 'tamanho', 'package']:
+                            found_key = k
+                            break
+                        if spec_key == 'Tipo' and k.lower() in ['tipo', 'função', 'tipo/encapsulamento']:
+                            found_key = k
+                            break
+                            
+                    if found_key:
+                        if not properties[found_key]:
+                            properties[found_key] = spec_val
+                    else:
+                        properties[spec_key] = spec_val
+
         try:
             if old_comp_id:
                 LocalDatabaseManager.execute_query("DELETE FROM components WHERE id = ?", (old_comp_id,))
