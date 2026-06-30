@@ -346,8 +346,13 @@ class CategoryUIBuilder:
             add_entry(0, 1, "Tipo Saída (Fototransistor):", "component_type")
 
         else:  # Outros
-            add_entry(0, 0, "Descrição / Valor:", "raw_value")
-            add_entry(0, 1, "Tipo / Encapsulamento:", "component_type")
+            if custom_fields:
+                for i, field in enumerate(custom_fields):
+                    field_name = field.get("name", f"Campo {i+1}")
+                    add_entry(i // 3, i % 3, field_name + ":", field_name)
+            else:
+                add_entry(0, 0, "Descrição / Valor:", "raw_value")
+                add_entry(0, 1, "Tipo / Encapsulamento:", "component_type")
 
         return inputs
 
@@ -404,10 +409,16 @@ class CategoryUIBuilder:
             comp_type = get_val("component_type")
 
         else:
-            raw_val = get_val("raw_value")
-            voltage = get_val("voltage")
-            tolerance = get_val("tolerance")
-            comp_type = get_val("component_type")
+            if custom_fields:
+                for field in custom_fields:
+                    field_name = field.get("name")
+                    if field_name:
+                        properties[field_name] = get_val(field_name)
+            else:
+                raw_val = get_val("raw_value")
+                voltage = get_val("voltage")
+                tolerance = get_val("tolerance")
+                comp_type = get_val("component_type")
 
         return raw_val, voltage, tolerance, comp_type, properties
 
@@ -1171,7 +1182,9 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 
             for field in fields:
                 field_name = field["name"]
-                if field_name in ["Código SMD", "Capacitância", "Indutância"]:
+                if field_name in properties:
+                    set_val(field_name, properties[field_name])
+                elif field_name in ["Código SMD", "Capacitância", "Indutância"]:
                     set_val(field_name, c_raw)
                 elif field_name in ["Tensão Máx (VCEO/VDS)", "Tensão"]:
                     set_val(field_name, c_volt)
