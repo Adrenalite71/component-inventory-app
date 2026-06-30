@@ -1178,30 +1178,24 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             elif logic_type == "Diodo":
                 if 'Tipo' in properties: self.diode_tipo_cb.set(properties['Tipo'])
                 if 'Encapsulamento' in properties: self.diode_encaps_cb.set(properties['Encapsulamento'])
-                if 'Tensão Máx (V)' in properties:
-                    self.diode_tensao_entry.delete(0, "end")
-                    self.diode_tensao_entry.insert(0, properties['Tensão Máx (V)'])
-                if 'Corrente Máx (A)' in properties:
-                    self.diode_corrente_entry.delete(0, "end")
-                    self.diode_corrente_entry.insert(0, properties['Corrente Máx (A)'])
+                self.diode_tensao_entry.delete(0, "end")
+                self.diode_tensao_entry.insert(0, str(properties.get('Tensão Máx (V)', '')))
+                self.diode_corrente_entry.delete(0, "end")
+                self.diode_corrente_entry.insert(0, str(properties.get('Corrente Máx (A)', '')))
             elif logic_type == "Ponte Retificadora":
                 if 'Fases' in properties: self.bridge_fases_cb.set(properties['Fases'])
                 if 'Encapsulamento' in properties: self.bridge_encaps_cb.set(properties['Encapsulamento'])
-                if 'Tensão Máx (V)' in properties:
-                    self.bridge_tensao_entry.delete(0, "end")
-                    self.bridge_tensao_entry.insert(0, properties['Tensão Máx (V)'])
-                if 'Corrente Máx (A)' in properties:
-                    self.bridge_corrente_entry.delete(0, "end")
-                    self.bridge_corrente_entry.insert(0, properties['Corrente Máx (A)'])
+                self.bridge_tensao_entry.delete(0, "end")
+                self.bridge_tensao_entry.insert(0, str(properties.get('Tensão Máx (V)', '')))
+                self.bridge_corrente_entry.delete(0, "end")
+                self.bridge_corrente_entry.insert(0, str(properties.get('Corrente Máx (A)', '')))
             elif logic_type == "Relé":
                 if 'Tipo' in properties: self.relay_tipo_cb.set(properties['Tipo'])
                 if 'Tipo de Contato' in properties: self.relay_contato_cb.set(properties['Tipo de Contato'])
-                if 'Tensão da Bobina (V)' in properties:
-                    self.relay_bobina_entry.delete(0, "end")
-                    self.relay_bobina_entry.insert(0, properties['Tensão da Bobina (V)'])
-                if 'Corrente Máx dos Contatos (A)' in properties:
-                    self.relay_corrente_entry.delete(0, "end")
-                    self.relay_corrente_entry.insert(0, properties['Corrente Máx dos Contatos (A)'])
+                self.relay_bobina_entry.delete(0, "end")
+                self.relay_bobina_entry.insert(0, str(properties.get('Tensão da Bobina (V)', '')))
+                self.relay_corrente_entry.delete(0, "end")
+                self.relay_corrente_entry.insert(0, str(properties.get('Corrente Máx dos Contatos (A)', '')))
             else:
                 set_val("raw_value", c_raw)
                 set_val("voltage", c_volt)
@@ -1233,6 +1227,14 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         name = self.name_entry.get().strip()
         if not name:
             return
+            
+        cat = self.cat_var.get()
+        if cat == "Diodo" and hasattr(self, "diode_tensao_entry"):
+            if len(self.diode_tensao_entry.get().strip()) > 0: return
+        elif cat == "Ponte Retificadora" and hasattr(self, "bridge_tensao_entry"):
+            if len(self.bridge_tensao_entry.get().strip()) > 0: return
+        elif cat == "Relé" and hasattr(self, "relay_bobina_entry"):
+            if len(self.relay_bobina_entry.get().strip()) > 0: return
             
         self.auto_fill_specs(event)
         
