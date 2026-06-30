@@ -1153,7 +1153,6 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                                 band_vars[i].set(color)
                     
             elif logic_type == "Transistor":
-                # Raw value format: "BJT (NPN)"
                 import re
                 m = re.match(r"(.*?)\s*\((.*?)\)", c_raw)
                 tipo = c_raw
@@ -1163,7 +1162,6 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     pol = m.group(2).strip()
                 
                 set_val("transistor_tipo", tipo)
-                # trigger the combobox command
                 for widget in self.dynamic_frame.winfo_children():
                     if isinstance(widget, ctk.CTkOptionMenu):
                         vals = widget.cget("values")
@@ -1177,6 +1175,33 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 set_val("tolerance", c_tol)
                 set_val("component_type", c_type)
                 
+            elif logic_type == "Diodo":
+                if 'Tipo' in properties: self.diode_tipo_cb.set(properties['Tipo'])
+                if 'Encapsulamento' in properties: self.diode_encaps_cb.set(properties['Encapsulamento'])
+                if 'Tensão Máx (V)' in properties:
+                    self.diode_tensao_entry.delete(0, "end")
+                    self.diode_tensao_entry.insert(0, properties['Tensão Máx (V)'])
+                if 'Corrente Máx (A)' in properties:
+                    self.diode_corrente_entry.delete(0, "end")
+                    self.diode_corrente_entry.insert(0, properties['Corrente Máx (A)'])
+            elif logic_type == "Ponte Retificadora":
+                if 'Fases' in properties: self.bridge_fases_cb.set(properties['Fases'])
+                if 'Encapsulamento' in properties: self.bridge_encaps_cb.set(properties['Encapsulamento'])
+                if 'Tensão Máx (V)' in properties:
+                    self.bridge_tensao_entry.delete(0, "end")
+                    self.bridge_tensao_entry.insert(0, properties['Tensão Máx (V)'])
+                if 'Corrente Máx (A)' in properties:
+                    self.bridge_corrente_entry.delete(0, "end")
+                    self.bridge_corrente_entry.insert(0, properties['Corrente Máx (A)'])
+            elif logic_type == "Relé":
+                if 'Tipo' in properties: self.relay_tipo_cb.set(properties['Tipo'])
+                if 'Tipo de Contato' in properties: self.relay_contato_cb.set(properties['Tipo de Contato'])
+                if 'Tensão da Bobina (V)' in properties:
+                    self.relay_bobina_entry.delete(0, "end")
+                    self.relay_bobina_entry.insert(0, properties['Tensão da Bobina (V)'])
+                if 'Corrente Máx dos Contatos (A)' in properties:
+                    self.relay_corrente_entry.delete(0, "end")
+                    self.relay_corrente_entry.insert(0, properties['Corrente Máx dos Contatos (A)'])
             else:
                 set_val("raw_value", c_raw)
                 set_val("voltage", c_volt)
