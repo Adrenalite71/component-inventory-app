@@ -903,7 +903,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.name_label.grid(row=2, column=0, padx=20, pady=10, sticky="w")
         self.name_entry = ctk.CTkEntry(self.container, width=300)
         self.name_entry.grid(row=2, column=1, padx=20, pady=10, sticky="w")
-        self.name_entry.bind("<FocusOut>", self.auto_fill_diode)
+        self.name_entry.bind("<FocusOut>", self.check_learned_specs)
 
         self.qty_label = ctk.CTkLabel(self.container, text="Quantidade:")
         self.qty_label.grid(row=3, column=0, padx=20, pady=10, sticky="w")
@@ -1204,6 +1204,43 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 elif field_name in ["Encapsulamento", "Tipo"]:
                     set_val(field_name, c_type)
 
+    def check_learned_specs(self, event=None):
+        name = self.name_entry.get().strip()
+        if not name:
+            return
+            
+        self.auto_fill_diode(event)
+        
+        learned = LocalDatabaseManager.get_learned_spec(name)
+        if learned:
+            ans = messagebox.askyesno("Memória do Sistema", f"Temos dados salvos para o componente '{name.upper()}'. Gostaria de preencher automaticamente?")
+            if ans:
+                cat = self.cat_var.get()
+                if cat == "Diodo":
+                    if 'Tipo' in learned: self.diode_tipo_cb.set(learned['Tipo'])
+                    if 'Encapsulamento' in learned: self.diode_encaps_cb.set(learned['Encapsulamento'])
+                    if 'Tensão Máx (V)' in learned:
+                        self.diode_tensao_entry.delete(0, "end")
+                        self.diode_tensao_entry.insert(0, learned['Tensão Máx (V)'])
+                    if 'Corrente Máx (A)' in learned:
+                        self.diode_corrente_entry.delete(0, "end")
+                        self.diode_corrente_entry.insert(0, learned['Corrente Máx (A)'])
+                elif cat == "Ponte Retificadora":
+                    if 'Fases' in learned: self.bridge_fases_cb.set(learned['Fases'])
+                    if 'Encapsulamento' in learned: self.bridge_encaps_cb.set(learned['Encapsulamento'])
+                    if 'Tensão Máx (V)' in learned:
+                        self.bridge_tensao_entry.delete(0, "end")
+                        self.bridge_tensao_entry.insert(0, learned['Tensão Máx (V)'])
+                    if 'Corrente Máx (A)' in learned:
+                        self.bridge_corrente_entry.delete(0, "end")
+                        self.bridge_corrente_entry.insert(0, learned['Corrente Máx (A)'])
+                else:
+                    for k, v in learned.items():
+                        if k in self.dynamic_inputs:
+                            var = self.dynamic_inputs[k]
+                            if isinstance(var, (ctk.StringVar, ctk.IntVar)):
+                                var.set(v)
+
     def auto_fill_diode(self, event=None):
         cat = self.cat_var.get()
         if cat in ["Diodo", "Ponte Retificadora"]:
@@ -1405,6 +1442,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 else:
                     properties["Corrente"] = specs["current"]
         try:
+            LocalDatabaseManager.save_learned_spec(name, properties)
             if old_comp_id:
                 LocalDatabaseManager.execute_query("DELETE FROM components WHERE id = ?", (old_comp_id,))
 
@@ -1476,6 +1514,11 @@ class SearchFrame(ctk.CTkFrame):
         )
         self.refresh_btn.grid(row=0, column=3, padx=20, pady=15, sticky="w")
 
+        self.datasheet_btn = ctk.CTkButton(
+            self.search_container, text="Ver Datasheet", command=self.open_datasheet, fg_color="#1f538d", hover_color="#14375e"
+        )
+        self.datasheet_btn.grid(row=0, column=4, padx=20, pady=15, sticky="w")
+
         # Dynamic Filters Area (Using same UI Builder for EXACT match)
         self.filters_frame = ctk.CTkFrame(self.search_container, fg_color="transparent")
         self.filters_frame.grid(
@@ -1534,6 +1577,29 @@ class SearchFrame(ctk.CTkFrame):
         self.btn_adjust.pack(pady=(0, 10))
         
         self.tree.bind("<Double-1>", lambda e: self.quick_adjust_stock())
+
+    def open_datasheet(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um componente na tabela para ver o datasheet.")
+            return
+            
+        item = selected[0]
+        values = self.tree.item(item, "values")
+        if not values:
+            return
+            
+        comp_name = values[0]
+        if not comp_name or comp_name == "-":
+            comp_name = values[2]
+            
+        if not comp_name or comp_name == "-":
+            messagebox.showwarning("Aviso", "Nenhum nome/valor identificado para a pesquisa de datasheet.")
+            return
+            
+        import webbrowser
+        url = f"https://search.alldatasheet.com/Item.jsp?Searchword={comp_name}"
+        webbrowser.open(url)
 
     def quick_adjust_stock(self):
         selected = self.tree.selection()
