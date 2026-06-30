@@ -1893,6 +1893,26 @@ class SearchFrame(ctk.CTkFrame):
                         except Exception:
                             props = {}
 
+                        if self.cat_var.get() == "Todos":
+                            if cat in ["Diodo", "Ponte Retificadora"]:
+                                v_tensao = props.get('Tensão Máx (V)', '-')
+                                v_corrente = props.get('Corrente Máx (A)', '-')
+                                v_encaps = props.get('Encapsulamento', '-')
+                                v_tipo = props.get('Tipo', props.get('Fases', '-'))
+                                if v_tensao != '-': voltage = v_tensao
+                                if v_corrente != '-': tolerance = v_corrente
+                                if v_encaps != '-': comp_type = v_encaps
+                                if v_tipo != '-': raw_val = v_tipo
+                            elif cat == "Relé":
+                                v_bobina = props.get('Tensão da Bobina (V)', '-')
+                                v_contatos = props.get('Corrente Máx dos Contatos (A)', '-')
+                                v_tipo = props.get('Tipo', '-')
+                                v_contato = props.get('Tipo de Contato', '-')
+                                if v_bobina != '-': voltage = v_bobina
+                                if v_contatos != '-': tolerance = v_contatos
+                                if v_tipo != '-': comp_type = v_tipo
+                                if v_contato != '-': raw_val = v_contato
+
                         active_cols = self.tree["columns"]
                         row_values = []
                         for col in active_cols:
