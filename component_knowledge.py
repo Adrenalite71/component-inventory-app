@@ -45,3 +45,22 @@ def get_semiconductor_specs(part_number: str):
         return {'Tipo': 'Zener'}
         
     return None
+
+def get_relay_specs(part_number: str):
+    if not part_number:
+        return None
+
+    pn_lower = part_number.lower().strip()
+    
+    specs = {
+        'srd-05vdc': {'Tipo': 'Eletromecânico', 'Tipo de Contato': 'SPDT (1 Reversível)', 'Tensão da Bobina (V)': '5', 'Corrente Máx dos Contatos (A)': '10'},
+        'srd-12vdc': {'Tipo': 'Eletromecânico', 'Tipo de Contato': 'SPDT (1 Reversível)', 'Tensão da Bobina (V)': '12', 'Corrente Máx dos Contatos (A)': '10'},
+        'srd-24vdc': {'Tipo': 'Eletromecânico', 'Tipo de Contato': 'SPDT (1 Reversível)', 'Tensão da Bobina (V)': '24', 'Corrente Máx dos Contatos (A)': '10'},
+        'fotek ssr-40da': {'Tipo': 'Estado Sólido (SSR)', 'Tipo de Contato': 'SPST-NO (1 NA)', 'Tensão da Bobina (V)': '3-32 (DC)', 'Corrente Máx dos Contatos (A)': '40'}
+    }
+    
+    for key, spec in specs.items():
+        if key in pn_lower:
+            return spec
+            
+    return None

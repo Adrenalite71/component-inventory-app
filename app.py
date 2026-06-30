@@ -1209,7 +1209,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         if not name:
             return
             
-        self.auto_fill_diode(event)
+        self.auto_fill_specs(event)
         
         learned = LocalDatabaseManager.get_learned_spec(name)
         if learned:
@@ -1234,6 +1234,15 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     if 'Corrente Máx (A)' in learned:
                         self.bridge_corrente_entry.delete(0, "end")
                         self.bridge_corrente_entry.insert(0, learned['Corrente Máx (A)'])
+                elif cat == "Relé":
+                    if 'Tipo' in learned: self.relay_tipo_cb.set(learned['Tipo'])
+                    if 'Tipo de Contato' in learned: self.relay_contato_cb.set(learned['Tipo de Contato'])
+                    if 'Tensão da Bobina (V)' in learned:
+                        self.relay_bobina_entry.delete(0, "end")
+                        self.relay_bobina_entry.insert(0, learned['Tensão da Bobina (V)'])
+                    if 'Corrente Máx dos Contatos (A)' in learned:
+                        self.relay_corrente_entry.delete(0, "end")
+                        self.relay_corrente_entry.insert(0, learned['Corrente Máx dos Contatos (A)'])
                 else:
                     for k, v in learned.items():
                         if k in self.dynamic_inputs:
@@ -1241,11 +1250,12 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                             if isinstance(var, (ctk.StringVar, ctk.IntVar)):
                                 var.set(v)
 
-    def auto_fill_diode(self, event=None):
+    def auto_fill_specs(self, event=None):
         cat = self.cat_var.get()
+        name = self.name_entry.get().strip()
+        
         if cat in ["Diodo", "Ponte Retificadora"]:
             from component_knowledge import get_semiconductor_specs
-            name = self.name_entry.get().strip()
             specs = get_semiconductor_specs(name)
             if specs:
                 if cat == "Diodo":
@@ -1270,6 +1280,20 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     if 'Corrente Máx (A)' in specs:
                         self.bridge_corrente_entry.delete(0, "end")
                         self.bridge_corrente_entry.insert(0, specs['Corrente Máx (A)'])
+        elif cat == "Relé":
+            from component_knowledge import get_relay_specs
+            specs = get_relay_specs(name)
+            if specs:
+                if 'Tipo' in specs:
+                    self.relay_tipo_cb.set(specs['Tipo'])
+                if 'Tipo de Contato' in specs:
+                    self.relay_contato_cb.set(specs['Tipo de Contato'])
+                if 'Tensão da Bobina (V)' in specs:
+                    self.relay_bobina_entry.delete(0, "end")
+                    self.relay_bobina_entry.insert(0, specs['Tensão da Bobina (V)'])
+                if 'Corrente Máx dos Contatos (A)' in specs:
+                    self.relay_corrente_entry.delete(0, "end")
+                    self.relay_corrente_entry.insert(0, specs['Corrente Máx dos Contatos (A)'])
 
     def draw_diode_fields(self):
         for widget in self.dynamic_frame.winfo_children():
@@ -1319,6 +1343,30 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.bridge_corrente_entry = ctk.CTkEntry(self.dynamic_frame)
         self.bridge_corrente_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
 
+    def draw_relay_fields(self):
+        for widget in self.dynamic_frame.winfo_children():
+            widget.destroy()
+        
+        self.dynamic_inputs = {}
+        
+        ctk.CTkLabel(self.dynamic_frame, text="Tipo:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.relay_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Eletromecânico', 'Estado Sólido (SSR)', 'Reed', 'Módulo', 'Outro'])
+        self.relay_tipo_cb.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.relay_tipo_cb.set('Eletromecânico')
+
+        ctk.CTkLabel(self.dynamic_frame, text="Tipo de Contato:").grid(row=0, column=2, padx=5, pady=5, sticky="e")
+        self.relay_contato_cb = ctk.CTkComboBox(self.dynamic_frame, values=['SPDT (1 Reversível)', 'DPDT (2 Reversíveis)', 'SPST-NO (1 NA)', 'SPST-NC (1 NF)', 'Outro'])
+        self.relay_contato_cb.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+        self.relay_contato_cb.set('SPDT (1 Reversível)')
+
+        ctk.CTkLabel(self.dynamic_frame, text="Tensão da Bobina (V):").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.relay_bobina_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.relay_bobina_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ctk.CTkLabel(self.dynamic_frame, text="Corrente Máx dos Contatos (A):").grid(row=1, column=2, padx=5, pady=5, sticky="e")
+        self.relay_corrente_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.relay_corrente_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+
     def on_category_change(self, category):
         for widget in self.dynamic_frame.winfo_children():
             widget.destroy()
@@ -1327,6 +1375,8 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.draw_diode_fields()
         elif category == "Ponte Retificadora":
             self.draw_bridge_fields()
+        elif category == "Relé":
+            self.draw_relay_fields()
         else:
             cat_config = getattr(self, "cat_logic_map", {}).get(
                 category, {"logic_type": "Outros", "fields": "[]"}
@@ -1381,6 +1431,19 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 "Corrente Máx (A)": self.bridge_corrente_entry.get().strip()
             }
             logic_type = "Ponte Retificadora"
+            normalized_val = None
+        elif category == "Relé":
+            raw_val = ""
+            voltage = ""
+            tolerance = ""
+            comp_type = ""
+            properties = {
+                "Tipo": self.relay_tipo_cb.get(),
+                "Tipo de Contato": self.relay_contato_cb.get(),
+                "Tensão da Bobina (V)": self.relay_bobina_entry.get().strip(),
+                "Corrente Máx dos Contatos (A)": self.relay_corrente_entry.get().strip()
+            }
+            logic_type = "Relé"
             normalized_val = None
         else:
             cat_config = getattr(self, "cat_logic_map", {}).get(
