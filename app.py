@@ -1012,6 +1012,31 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.name_entry.delete(0, "end")
             self.qty_entry.delete(0, "end")
             self.qty_entry.insert(0, "1")
+            
+            cat = self.cat_var.get()
+            if cat == "Transistor":
+                for k, v in self.dynamic_inputs.items():
+                    if isinstance(v, ctk.StringVar):
+                        v.set("")
+            elif cat == "Diodo":
+                if hasattr(self, "diode_tensao_entry"):
+                    self.diode_tipo_cb.set('Retificador')
+                    self.diode_encaps_cb.set('DO-41 (PTH)')
+                    self.diode_tensao_entry.delete(0, "end")
+                    self.diode_corrente_entry.delete(0, "end")
+            elif cat == "Ponte Retificadora":
+                if hasattr(self, "bridge_tensao_entry"):
+                    self.bridge_fases_cb.set('Monofásica')
+                    self.bridge_encaps_cb.set('KBP (PTH)')
+                    self.bridge_tensao_entry.delete(0, "end")
+                    self.bridge_corrente_entry.delete(0, "end")
+            elif cat == "Relé":
+                if hasattr(self, "relay_bobina_entry"):
+                    self.relay_tipo_cb.set('Eletromecânico')
+                    self.relay_contato_cb.set('SPDT (1 Reversível)')
+                    self.relay_bobina_entry.delete(0, "end")
+                    self.relay_corrente_entry.delete(0, "end")
+                    
             return
             
         comp = LocalDatabaseManager.fetch_one(
