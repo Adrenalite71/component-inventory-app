@@ -1454,6 +1454,9 @@ class SearchFrame(ctk.CTkFrame):
         self.on_search_category_change(self.cat_var.get())
 
     def on_search_category_change(self, category):
+        if not hasattr(self, 'tree'):
+            return
+            
         if category == "Todos":
             for widget in self.filters_frame.winfo_children():
                 widget.destroy()
