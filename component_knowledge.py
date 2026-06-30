@@ -84,3 +84,22 @@ def get_transistor_specs(part_number: str):
             return spec
             
     return None
+
+def get_sensor_specs(part_number: str):
+    if not part_number:
+        return None
+
+    pn_lower = part_number.lower().strip()
+    
+    specs = {
+        'hc-sr04': {'Tipo': 'Distância/Ultrassom', 'Sinal de Interface': 'Digital (High/Low)', 'Tensão de Operação (V)': '5', 'Corrente Máx (mA)': '15'},
+        'dht11': {'Tipo': 'Temp/Umidade', 'Sinal de Interface': 'One-Wire', 'Tensão de Operação (V)': '3.3 - 5', 'Corrente Máx (mA)': '2.5'},
+        'mpu6050': {'Tipo': 'Acelerômetro/Giro', 'Sinal de Interface': 'I2C', 'Tensão de Operação (V)': '3.3 - 5', 'Corrente Máx (mA)': '4'},
+        'hc-sr501': {'Tipo': 'Presença/PIR', 'Sinal de Interface': 'Digital (High/Low)', 'Tensão de Operação (V)': '5 - 20', 'Corrente Máx (mA)': '0.06'}
+    }
+    
+    for key, spec in specs.items():
+        if key in pn_lower:
+            return spec
+            
+    return None
