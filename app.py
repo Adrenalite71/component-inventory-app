@@ -1493,7 +1493,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.dynamic_inputs = {}
         
         ctk.CTkLabel(self.dynamic_frame, text="Tipo:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.sensor_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Temp/Umidade', 'Distância/Ultrassom', 'Presença/PIR', 'Acelerômetro/Giro', 'Tensão/Corrente', 'Driver/Motor', 'Outro'])
+        self.sensor_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Temp/Umidade', 'Distância/Ultrassom', 'Presença/PIR', 'Acelerômetro/Giro', 'Tensão/Corrente', 'Driver/Motor', 'Indutivo', 'Capacitivo', 'Fotoelétrico', 'Outro'])
         self.sensor_tipo_cb.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         self.sensor_tipo_cb.set('Temp/Umidade')
 
