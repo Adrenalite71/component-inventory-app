@@ -64,3 +64,23 @@ def get_relay_specs(part_number: str):
             return spec
             
     return None
+
+def get_transistor_specs(part_number: str):
+    if not part_number:
+        return None
+
+    pn_lower = part_number.lower().strip()
+    
+    specs = {
+        'bc548': {'Tipo': 'BJT', 'Polaridade': 'NPN', 'Encapsulamento': 'TO-92', 'Tensão Máx (VCEO/VDS)': '30', 'Corrente Máx (IC/ID)': '0.1'},
+        'bc558': {'Tipo': 'BJT', 'Polaridade': 'PNP', 'Encapsulamento': 'TO-92', 'Tensão Máx (VCEO/VDS)': '30', 'Corrente Máx (IC/ID)': '0.1'},
+        '2n2222': {'Tipo': 'BJT', 'Polaridade': 'NPN', 'Encapsulamento': 'TO-92', 'Tensão Máx (VCEO/VDS)': '40', 'Corrente Máx (IC/ID)': '0.8'},
+        'tip122': {'Tipo': 'Darlington', 'Polaridade': 'NPN', 'Encapsulamento': 'TO-220', 'Tensão Máx (VCEO/VDS)': '100', 'Corrente Máx (IC/ID)': '5'},
+        'irf540n': {'Tipo': 'MOSFET', 'Polaridade': 'N-Channel', 'Encapsulamento': 'TO-220', 'Tensão Máx (VCEO/VDS)': '100', 'Corrente Máx (IC/ID)': '33'}
+    }
+    
+    for key, spec in specs.items():
+        if key in pn_lower:
+            return spec
+            
+    return None
