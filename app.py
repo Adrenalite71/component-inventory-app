@@ -1473,7 +1473,7 @@ class SearchFrame(ctk.CTkFrame):
 
         sql = """
             SELECT c.id, c.name, c.category, c.raw_value, c.voltage, c.tolerance, c.component_type, c.quantity, 
-                   s.drawer_code, s.subdivision_index, c.normalized_base_value
+                   s.drawer_code, s.subdivision_index, c.normalized_base_value, c.properties
             FROM components c
             JOIN subdivisions s ON c.subdivision_id = s.id
             WHERE 1=1
@@ -1565,6 +1565,9 @@ class SearchFrame(ctk.CTkFrame):
                         cat = str(row["category"])
                         raw_val = str(row["raw_value"])
                         norm_val = row.get("normalized_base_value")
+                        voltage = str(row["voltage"])
+                        tolerance = str(row["tolerance"])
+                        comp_type = str(row["component_type"])
 
                         if (
                             norm_val != "-"
@@ -1585,6 +1588,32 @@ class SearchFrame(ctk.CTkFrame):
                             formatted = PTHResistorCalculator.calculate(bands)
                             if formatted:
                                 raw_val = formatted
+                        
+                        if cat == "LED":
+                            try:
+                                props = row.get("properties", "{}")
+                                if isinstance(props, str):
+                                    props = json.loads(props) if props and props != "-" else {}
+                                elif not isinstance(props, dict):
+                                    props = {}
+                                
+                                def get_prop(keys):
+                                    for k, v in props.items():
+                                        if k.lower() in keys and str(v).strip():
+                                            return str(v)
+                                    return None
+
+                                p_tensao = get_prop(["tensão", "tensao", "voltage"])
+                                p_corrente = get_prop(["corrente", "current"])
+                                p_cor = get_prop(["cor", "color"])
+                                p_tamanho = get_prop(["tamanho", "size"])
+
+                                if p_tensao: voltage = p_tensao
+                                if p_corrente: tolerance = p_corrente
+                                if p_cor: raw_val = p_cor
+                                if p_tamanho: comp_type = p_tamanho
+                            except Exception:
+                                pass
 
                         self.tree.insert(
                             "",
@@ -1593,9 +1622,9 @@ class SearchFrame(ctk.CTkFrame):
                                 str(row["name"]),
                                 cat,
                                 raw_val,
-                                str(row["voltage"]),
-                                str(row["tolerance"]),
-                                str(row["component_type"]),
+                                voltage,
+                                tolerance,
+                                comp_type,
                                 str(row["quantity"]),
                                 str(row["Location"]),
                             ),
