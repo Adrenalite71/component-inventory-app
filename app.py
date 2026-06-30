@@ -1323,6 +1323,33 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 if 'Corrente Máx dos Contatos (A)' in specs:
                     self.relay_corrente_entry.delete(0, "end")
                     self.relay_corrente_entry.insert(0, specs['Corrente Máx dos Contatos (A)'])
+        elif cat == "Transistor":
+            from component_knowledge import get_transistor_specs
+            specs = get_transistor_specs(name)
+            if specs:
+                is_empty = True
+                if "voltage" in self.dynamic_inputs and self.dynamic_inputs["voltage"].get().strip():
+                    is_empty = False
+                
+                if is_empty:
+                    if 'Tipo' in specs and "transistor_tipo" in self.dynamic_inputs:
+                        self.dynamic_inputs["transistor_tipo"].set(specs['Tipo'])
+                        for widget in self.dynamic_frame.winfo_children():
+                            if isinstance(widget, ctk.CTkOptionMenu):
+                                vals = widget.cget("values")
+                                if vals and "BJT" in vals:
+                                    if widget._command:
+                                        widget._command(specs['Tipo'])
+                                    break
+                    
+                    if 'Polaridade' in specs and "transistor_pol" in self.dynamic_inputs:
+                        self.dynamic_inputs["transistor_pol"].set(specs['Polaridade'])
+                    if 'Encapsulamento' in specs and "component_type" in self.dynamic_inputs:
+                        self.dynamic_inputs["component_type"].set(specs['Encapsulamento'])
+                    if 'Tensão Máx (VCEO/VDS)' in specs and "voltage" in self.dynamic_inputs:
+                        self.dynamic_inputs["voltage"].set(specs['Tensão Máx (VCEO/VDS)'])
+                    if 'Corrente Máx (IC/ID)' in specs and "tolerance" in self.dynamic_inputs:
+                        self.dynamic_inputs["tolerance"].set(specs['Corrente Máx (IC/ID)'])
 
     def draw_diode_fields(self):
         for widget in self.dynamic_frame.winfo_children():
