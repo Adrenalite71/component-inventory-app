@@ -1026,6 +1026,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             
             self.cat_var.set(comp[2])
             self.on_category_change(comp[2])
+            self.update_idletasks()
             
             cat_config = getattr(self, "cat_logic_map", {}).get(comp[2], {"logic_type": "Outros", "fields": "[]"})
             
