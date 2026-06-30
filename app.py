@@ -1598,7 +1598,7 @@ class SearchFrame(ctk.CTkFrame):
             return
             
         import webbrowser
-        url = f"https://search.alldatasheet.com/Item.jsp?Searchword={comp_name}"
+        url = f"https://www.alldatasheet.com/view.jsp?Searchword={comp_name}"
         webbrowser.open(url)
 
     def quick_adjust_stock(self):
