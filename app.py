@@ -24,113 +24,7 @@ CATEGORIES = [
 ]
 
 
-class DatabaseHelper:
-    @staticmethod
-    def init_db():
-        conn = DatabaseManager.get_connection()
-        c = conn.cursor()
-
-        # Create base tables
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS drawers (
-                door_code TEXT PRIMARY KEY CHECK(length(door_code) = 4),
-                capacity INTEGER
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS subdivisions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                drawer_code TEXT,
-                subdivision_index INTEGER,
-                FOREIGN KEY(drawer_code) REFERENCES drawers(door_code)
-            )
-        """)
-
-        # MIGRATION: Remove capacity constraint from drawers table if it exists
-        c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='drawers'")
-        row = c.fetchone()
-        if row and "capacity <=" in row[0]:
-            c.execute(
-                "CREATE TABLE drawers_new (door_code TEXT PRIMARY KEY CHECK(length(door_code) = 4), capacity INTEGER)"
-            )
-            c.execute("INSERT INTO drawers_new SELECT * FROM drawers")
-            c.execute("DROP TABLE drawers")
-            c.execute("ALTER TABLE drawers_new RENAME TO drawers")
-
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS components (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                raw_value TEXT,
-                normalized_base_value REAL,
-                quantity INTEGER DEFAULT 0,
-                subdivision_id INTEGER,
-                properties TEXT DEFAULT '{}',
-                FOREIGN KEY(subdivision_id) REFERENCES subdivisions(id)
-            )
-        """)
-
-        # MIGRATION: Add missing columns if they don't exist
-        c.execute("PRAGMA table_info(components)")
-        existing_columns = [col[1] for col in c.fetchall()]
-
-        if "voltage" not in existing_columns:
-            c.execute("ALTER TABLE components ADD COLUMN voltage TEXT")
-        if "tolerance" not in existing_columns:
-            c.execute("ALTER TABLE components ADD COLUMN tolerance TEXT")
-        if "component_type" not in existing_columns:
-            c.execute("ALTER TABLE components ADD COLUMN component_type TEXT")
-        if "properties" not in existing_columns:
-            c.execute("ALTER TABLE components ADD COLUMN properties TEXT DEFAULT '{}'")
-
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                logic_type TEXT NOT NULL,
-                fields_json TEXT DEFAULT '[]'
-            )
-        """)
-
-        c.execute("PRAGMA table_info(categories)")
-        existing_cat_cols = [col[1] for col in c.fetchall()]
-        if "fields_json" not in existing_cat_cols:
-            c.execute("ALTER TABLE categories ADD COLUMN fields_json TEXT DEFAULT '[]'")
-
-        c.execute("SELECT count(*) FROM categories")
-        row = c.fetchone()
-        if row and row[0] == 0:
-            for cat in CATEGORIES:
-                c.execute(
-                    "INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)",
-                    (cat, cat, "[]"),
-                )
-
-        c.execute("DELETE FROM categories WHERE name IN ('MOSFET', 'IGBT')")
-
-        conn.commit()
-        conn.close()
-
-    @staticmethod
-    def get_categories():
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT name, logic_type, fields_json FROM categories ORDER BY id")
-        rows = c.fetchall()
-        conn.close()
-        return rows
-
-    @staticmethod
-    def get_connection():
-        return DatabaseManager.get_connection()
-
-
-
-
-
-
-
+from database_manager import LocalDatabaseManager
 
 class CategoryUIBuilder:
     """Shared class to build exactly identical UI components for both Registration and Search"""
@@ -640,7 +534,7 @@ class CategoryManagerWindow(ctk.CTkToplevel):
         import sqlite3
         from tkinter import messagebox
 
-        categories = DatabaseHelper.get_categories()
+        categories = LocalDatabaseManager.get_categories()
         for cat in categories:
             name = cat[0]
             rb = ctk.CTkRadioButton(
@@ -659,25 +553,17 @@ class CategoryManagerWindow(ctk.CTkToplevel):
 
         name = name.strip()
         if name:
-            import sqlite3
             from tkinter import messagebox
 
-            conn = None
             try:
-                conn = DatabaseHelper.get_connection()
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO categories (name, logic_type, fields_json) VALUES (?, ?, ?)",
-                    (name, "Outros", fields_json),
-                )
-                conn.commit()
+                LocalDatabaseManager.add_category(name, "Outros", fields_json)
                 self.refresh_list()
                 self.on_close_callback()
-            except sqlite3.IntegrityError:
-                messagebox.showerror("Erro", "Esta categoria já existe.")
-            finally:
-                if conn:
-                    conn.close()
+            except Exception as e:
+                if "UNIQUE constraint failed" in str(e) or "IntegrityError" in str(e):
+                    messagebox.showerror("Erro", "Esta categoria já existe.")
+                else:
+                    messagebox.showerror("Erro", str(e))
 
     def edit_category(self):
         old_name = self.selected_category.get()
@@ -687,15 +573,9 @@ class CategoryManagerWindow(ctk.CTkToplevel):
             messagebox.showwarning("Aviso", "Selecione uma categoria para editar.")
             return
 
-        import sqlite3
-
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute(
+        row = LocalDatabaseManager.fetch_one(
             "SELECT logic_type, fields_json FROM categories WHERE name = ?", (old_name,)
         )
-        row = c.fetchone()
-        conn.close()
 
         if row and row[0] != "Outros":
             # Standard category: Only allow rename
@@ -730,40 +610,23 @@ class CategoryManagerWindow(ctk.CTkToplevel):
             new_name = new_name.strip()
 
         if new_name and new_name != old_name:
-            import sqlite3
             from tkinter import messagebox
-
-            conn = DatabaseHelper.get_connection()
-            c = conn.cursor()
             try:
-                c.execute(
-                    "UPDATE categories SET name = ?, fields_json = ? WHERE name = ?",
-                    (new_name, fields_json, old_name),
-                )
-                c.execute(
-                    "UPDATE components SET category = ? WHERE category = ?",
-                    (new_name, old_name),
-                )
-                conn.commit()
+                LocalDatabaseManager.update_category(new_name, "Outros", fields_json, old_name)
+                # Since category names are hardcoded in components, we also need to update components
+                LocalDatabaseManager.execute_query("UPDATE components SET category = ? WHERE category = ?", (new_name, old_name))
                 self.selected_category.set(new_name)
                 self.refresh_list()
                 self.on_close_callback()
-            except sqlite3.IntegrityError:
-                messagebox.showerror("Erro", "Já existe uma categoria com este nome.")
-            finally:
-                conn.close()
+            except Exception as e:
+                if "UNIQUE constraint failed" in str(e) or "IntegrityError" in str(e):
+                    messagebox.showerror("Erro", "Já existe uma categoria com este nome.")
+                else:
+                    messagebox.showerror("Erro", str(e))
         elif new_name == old_name:
             # Maybe just fields changed
-            import sqlite3
-
-            conn = DatabaseHelper.get_connection()
-            c = conn.cursor()
-            c.execute(
-                "UPDATE categories SET fields_json = ? WHERE name = ?",
-                (fields_json, old_name),
-            )
-            conn.commit()
-            conn.close()
+            LocalDatabaseManager.update_category(old_name, "Outros", fields_json, old_name)
+            self.on_close_callback()
             self.on_close_callback()
 
     def delete_category(self):
@@ -774,32 +637,24 @@ class CategoryManagerWindow(ctk.CTkToplevel):
             messagebox.showwarning("Aviso", "Selecione uma categoria para excluir.")
             return
 
-        import sqlite3
         from tkinter import messagebox
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT count(*) FROM components WHERE category = ?", (name,))
-        row = c.fetchone()
-        count = row[0] if row else 0
+        count = LocalDatabaseManager.get_component_count_by_category(name)
 
         if count > 0:
             messagebox.showerror(
                 "Erro",
                 f"Não é possível excluir '{name}' pois existem {count} componentes usando esta categoria. Remova-os ou edite suas categorias primeiro.",
             )
-            conn.close()
             return
 
         if messagebox.askyesno(
             "Confirmar", f"Tem certeza que deseja excluir a categoria '{name}'?"
         ):
-            c.execute("DELETE FROM categories WHERE name = ?", (name,))
-            conn.commit()
+            LocalDatabaseManager.delete_category(name)
             self.selected_category.set("")
             self.refresh_list()
             self.on_close_callback()
-        conn.close()
 
     def on_close(self):
         self.on_close_callback()
@@ -857,11 +712,7 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
         for widget in self.list_frame.winfo_children():
             widget.destroy()
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT door_code, capacity FROM drawers ORDER BY door_code")
-        drawers = c.fetchall()
-        conn.close()
+        drawers = LocalDatabaseManager.get_drawers()
 
         for idx, (code, cap) in enumerate(drawers):
             row_frame = ctk.CTkFrame(self.list_frame, fg_color=("gray85", "gray25"))
@@ -904,16 +755,8 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
         ):
             return
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
         try:
-            c.execute(
-                "DELETE FROM components WHERE subdivision_id IN (SELECT id FROM subdivisions WHERE drawer_code = ?)",
-                (code,),
-            )
-            c.execute("DELETE FROM subdivisions WHERE drawer_code = ?", (code,))
-            c.execute("DELETE FROM drawers WHERE door_code = ?", (code,))
-            conn.commit()
+            LocalDatabaseManager.delete_drawer(code)
             messagebox.showinfo(
                 "Sucesso",
                 f"Gaveta {code} e seus componentes foram excluídos com sucesso.",
@@ -923,8 +766,6 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
             messagebox.showerror(
                 "Erro", f"Ocorreu um erro ao excluir a gaveta: {str(e)}"
             )
-        finally:
-            conn.close()
 
     def save_drawer(self):
         code = self.code_entry.get().strip()
@@ -944,84 +785,42 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
 
         capacity = int(capacity_str)
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
         try:
             if self.editing_code:
                 # Editing existing drawer
                 if self.editing_code != code:
                     # Rename drawer (door_code). Need to check if new code exists
-                    c.execute("SELECT 1 FROM drawers WHERE door_code = ?", (code,))
-                    if c.fetchone():
+                    if code in LocalDatabaseManager.get_drawer_codes():
                         messagebox.showerror(
                             "Erro", f"Já existe uma gaveta com o código {code}."
                         )
                         return
-                    c.execute(
+                    
+                    # Update drawer door code and capacity
+                    LocalDatabaseManager.execute_query(
                         "UPDATE subdivisions SET drawer_code = ? WHERE drawer_code = ?",
                         (code, self.editing_code),
                     )
-                    c.execute(
-                        "UPDATE drawers SET door_code = ?, capacity = ? WHERE door_code = ?",
-                        (code, capacity, self.editing_code),
-                    )
-                else:
-                    c.execute(
-                        "UPDATE drawers SET capacity = ? WHERE door_code = ?",
-                        (capacity, self.editing_code),
-                    )
-
-                # Manage subdivisions
-                c.execute(
-                    "SELECT count(*) FROM subdivisions WHERE drawer_code = ?", (code,)
-                )
-                row1 = c.fetchone()
-                current_subs = row1[0] if row1 else 0
-
-                if capacity > current_subs:
-                    for i in range(current_subs + 1, capacity + 1):
-                        c.execute(
-                            "INSERT INTO subdivisions (drawer_code, subdivision_index) VALUES (?, ?)",
-                            (code, i),
-                        )
-                elif capacity < current_subs:
-                    c.execute(
-                        """
-                        SELECT count(*) FROM components c
-                        JOIN subdivisions s ON c.subdivision_id = s.id
-                        WHERE s.drawer_code = ? AND s.subdivision_index > ?
-                    """,
-                        (code, capacity),
-                    )
-                    row2 = c.fetchone()
-                    if row2 and row2[0] > 0:
+                    
+                subs = LocalDatabaseManager.get_subdivisions(code if self.editing_code != code else self.editing_code)
+                current_subs = len(subs)
+                
+                if capacity < current_subs:
+                    comps_in_removed = LocalDatabaseManager.check_components_in_removed_subs(code if self.editing_code != code else self.editing_code, capacity)
+                    if comps_in_removed > 0:
                         messagebox.showerror(
                             "Erro",
                             "Existem componentes nas divisões que seriam removidas. Por favor, mova ou exclua esses componentes antes de reduzir a capacidade.",
                         )
                         return
-                    else:
-                        c.execute(
-                            "DELETE FROM subdivisions WHERE drawer_code = ? AND subdivision_index > ?",
-                            (code, capacity),
-                        )
-
-                conn.commit()
+                        
+                LocalDatabaseManager.update_drawer(code if self.editing_code != code else self.editing_code, capacity, current_subs)
                 messagebox.showinfo("Sucesso", f"Gaveta {code} atualizada com sucesso!")
                 self.editing_code = None
                 self.submit_btn.configure(text="Salvar Gaveta")
             else:
                 # New drawer
-                c.execute(
-                    "INSERT INTO drawers (door_code, capacity) VALUES (?, ?)",
-                    (code, capacity),
-                )
-                for i in range(1, capacity + 1):
-                    c.execute(
-                        "INSERT INTO subdivisions (drawer_code, subdivision_index) VALUES (?, ?)",
-                        (code, i),
-                    )
-                conn.commit()
+                LocalDatabaseManager.add_drawer(code, capacity)
                 messagebox.showinfo(
                     "Sucesso",
                     f"Gaveta {code} registrada com sucesso com {capacity} divisões!",
@@ -1032,12 +831,11 @@ class DrawerRegistrationFrame(ctk.CTkFrame):
             self.cap_entry.insert(0, "1")
             self.load_drawers()
 
-        except sqlite3.IntegrityError:
-            messagebox.showerror("Erro", f"Gaveta {code} já existe no sistema.")
         except Exception as e:
-            messagebox.showerror("Erro", f"Ocorreu um erro inesperado: {str(e)}")
-        finally:
-            conn.close()
+            if "UNIQUE constraint failed" in str(e) or "IntegrityError" in str(e):
+                messagebox.showerror("Erro", f"Gaveta {code} já existe no sistema.")
+            else:
+                messagebox.showerror("Erro", f"Ocorreu um erro inesperado: {str(e)}")
 
 
 class ComponentRegistrationFrame(ctk.CTkFrame):
@@ -1125,7 +923,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.on_category_change(self.cat_var.get())
 
     def update_categories(self):
-        rows = DatabaseHelper.get_categories()
+        rows = LocalDatabaseManager.get_categories()
         self.cat_logic_map = {
             row[0]: {"logic_type": row[1], "fields": row[2]} for row in rows
         }
@@ -1140,11 +938,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.cat_var.set("-")
 
     def update_drawers(self):
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT door_code FROM drawers ORDER BY door_code")
-        drawers = c.fetchall()
-        conn.close()
+        drawers = LocalDatabaseManager.get_drawers()
 
         drawer_list = [d[0] for d in drawers]
 
@@ -1162,20 +956,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         if not drawer_code or drawer_code == "Nenhuma gaveta":
             return
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute(
-            """
-            SELECT s.id, s.subdivision_index, c.id, c.name, c.quantity
-            FROM subdivisions s
-            LEFT JOIN components c ON s.id = c.subdivision_id
-            WHERE s.drawer_code = ?
-            ORDER BY s.subdivision_index
-        """,
-            (drawer_code,),
-        )
-        slots_data = c.fetchall()
-        conn.close()
+        slots_data = LocalDatabaseManager.get_slots_with_components(drawer_code)
 
         self.slot_options = []
         self.slot_mapping = {}
@@ -1211,11 +992,10 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.qty_entry.insert(0, "1")
             return
             
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT name, quantity, category, raw_value, voltage, tolerance, component_type, properties FROM components WHERE id = ?", (comp_id,))
-        comp = c.fetchone()
-        conn.close()
+        comp = LocalDatabaseManager.fetch_one(
+            "SELECT name, quantity, category, raw_value, voltage, tolerance, component_type, properties FROM components WHERE id = ?", 
+            (comp_id,)
+        )
         
         if comp:
             self.name_entry.delete(0, "end")
@@ -1454,32 +1234,41 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             if volt and not voltage:
                 voltage = volt
 
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
+        if category in ["Optoeletrônica", "LED", "Optoacoplador"] or "led" in name.lower():
+            from component_knowledge import get_led_specs
+            specs = get_led_specs(name)
+            if specs:
+                if not voltage:
+                    voltage = specs["voltage"]
+                
+                current_key = None
+                for k in properties.keys():
+                    if 'corrente' in k.lower() or 'current' in k.lower():
+                        current_key = k
+                        break
+                
+                if current_key:
+                    if not properties[current_key]:
+                        properties[current_key] = specs["current"]
+                else:
+                    properties["Corrente"] = specs["current"]
+
         try:
             if old_comp_id:
-                c.execute("DELETE FROM components WHERE id = ?", (old_comp_id,))
+                LocalDatabaseManager.execute_query("DELETE FROM components WHERE id = ?", (old_comp_id,))
 
-            c.execute(
-                """
-                INSERT INTO components 
-                (name, category, raw_value, quantity, voltage, tolerance, component_type, subdivision_id, normalized_base_value, properties)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    name,
-                    category,
-                    raw_val,
-                    int(qty),
-                    voltage,
-                    tolerance,
-                    comp_type,
-                    subdivision_id,
-                    normalized_val,
-                    json.dumps(properties),
-                ),
+            LocalDatabaseManager.add_component(
+                name,
+                category,
+                raw_val,
+                normalized_val,
+                int(qty),
+                subdivision_id,
+                json.dumps(properties),
+                voltage,
+                tolerance,
+                comp_type,
             )
-            conn.commit()
             messagebox.showinfo("Sucesso", f"Componente {name} salvo com sucesso!")
             
             if hasattr(self.master, 'search_frame'):
@@ -1494,8 +1283,6 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
 
         except Exception as e:
             messagebox.showerror("Erro ao salvar componente", f"Detalhes: {str(e)}")
-        finally:
-            conn.close()
 
 
 class SearchFrame(ctk.CTkFrame):
@@ -1618,7 +1405,7 @@ class SearchFrame(ctk.CTkFrame):
         StockAdjustmentModal(self, comp_id, comp_name, current_qty, self.perform_search)
 
     def update_categories(self):
-        rows = DatabaseHelper.get_categories()
+        rows = LocalDatabaseManager.get_categories()
         self.cat_logic_map = {
             row[0]: {"logic_type": row[1], "fields": row[2]} for row in rows
         }
@@ -1644,8 +1431,6 @@ class SearchFrame(ctk.CTkFrame):
     def perform_search(self):
         query_text = self.search_entry.get().strip()
         category = self.cat_var.get()
-
-        conn = DatabaseHelper.get_connection()
 
         sql = """
             SELECT c.id, c.name, c.category, c.raw_value, c.voltage, c.tolerance, c.component_type, c.quantity, 
@@ -1718,9 +1503,6 @@ class SearchFrame(ctk.CTkFrame):
                 "Erro de Pesquisa", f"Erro no banco de dados:\n{str(e)}"
             )
             return
-        finally:
-            if hasattr(conn, 'close'):
-                conn.close()
 
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -1841,11 +1623,7 @@ class StockAdjustmentModal(ctk.CTkToplevel):
             
         new_qty = max(0, self.current_qty + adj)
         
-        conn = DatabaseHelper.get_connection()
-        c = conn.cursor()
-        c.execute("UPDATE components SET quantity = ? WHERE id = ?", (new_qty, self.comp_id))
-        conn.commit()
-        conn.close()
+        LocalDatabaseManager.execute_query("UPDATE components SET quantity = ? WHERE id = ?", (new_qty, self.comp_id))
         
         self.callback()
         self.destroy()
@@ -2157,7 +1935,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        DatabaseHelper.init_db()
+        LocalDatabaseManager.init_db()
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
