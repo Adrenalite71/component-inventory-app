@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('perfil.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

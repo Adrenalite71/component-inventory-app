@@ -1,4 +1,4 @@
-from classes import SMDDecoder, PTHResistorCalculator, PTHResistorReverseParser
+from classes import SMDDecoder, PTHResistorCalculator, PTHResistorReverseParser, PackManagerFrame
 import sqlite3
 
 # pyrefly: ignore [missing-import]
@@ -284,6 +284,7 @@ class CategoryUIBuilder:
                 if val in ["BJT", "Darlington"]:
                     pol_label.grid()
                     pol_combo.grid()
+                    pol_combo.configure(state="normal")
                     pol_vals = ["NPN", "PNP"]
                     if is_search:
                         pol_vals.insert(0, "")
@@ -293,6 +294,7 @@ class CategoryUIBuilder:
                 elif val == "MOSFET":
                     pol_label.grid()
                     pol_combo.grid()
+                    pol_combo.configure(state="normal")
                     pol_vals = ["Canal N", "Canal P"]
                     if is_search:
                         pol_vals.insert(0, "")
@@ -300,12 +302,14 @@ class CategoryUIBuilder:
                     if inputs["transistor_pol"].get() not in pol_vals:
                         inputs["transistor_pol"].set(pol_vals[0])
                 elif val == "IGBT":
-                    pol_label.grid_remove()
-                    pol_combo.grid_remove()
-                    inputs["transistor_pol"].set("")
+                    pol_label.grid()
+                    pol_combo.grid()
+                    pol_combo.configure(values=["-"], state="disabled")
+                    inputs["transistor_pol"].set("-")
                 else:  # empty etc (for search)
                     pol_label.grid()
                     pol_combo.grid()
+                    pol_combo.configure(state="normal")
                     pol_vals = ["NPN", "PNP", "Canal N", "Canal P"]
                     if is_search:
                         pol_vals.insert(0, "")
@@ -1468,11 +1472,27 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     if 'Polaridade' in specs and "transistor_pol" in self.dynamic_inputs:
                         self.dynamic_inputs["transistor_pol"].set(specs['Polaridade'])
                     if 'Encapsulamento' in specs and "component_type" in self.dynamic_inputs:
-                        self.dynamic_inputs["component_type"].set(specs['Encapsulamento'])
+                        self.dynamic_inputs["component_type"].delete(0, "end")
+                        self.dynamic_inputs["component_type"].insert(0, specs['Encapsulamento'])
                     if 'Tensão Máx (VCEO/VDS)' in specs and "voltage" in self.dynamic_inputs:
-                        self.dynamic_inputs["voltage"].set(specs['Tensão Máx (VCEO/VDS)'])
+                        self.dynamic_inputs["voltage"].delete(0, "end")
+                        self.dynamic_inputs["voltage"].insert(0, specs['Tensão Máx (VCEO/VDS)'])
                     if 'Corrente Máx (IC/ID)' in specs and "tolerance" in self.dynamic_inputs:
-                        self.dynamic_inputs["tolerance"].set(specs['Corrente Máx (IC/ID)'])
+                        self.dynamic_inputs["tolerance"].delete(0, "end")
+                        self.dynamic_inputs["tolerance"].insert(0, specs['Corrente Máx (IC/ID)'])
+        elif cat == "CI (Circuito Integrado)":
+            from component_knowledge import get_custom_specs
+            specs = get_custom_specs(name)
+            if specs:
+                if 'Função/Modelo' in specs and "raw_value" in self.dynamic_inputs:
+                    self.dynamic_inputs["raw_value"].delete(0, "end")
+                    self.dynamic_inputs["raw_value"].insert(0, specs['Função/Modelo'])
+                if 'Número de Pinos' in specs and "tolerance" in self.dynamic_inputs:
+                    self.dynamic_inputs["tolerance"].delete(0, "end")
+                    self.dynamic_inputs["tolerance"].insert(0, specs['Número de Pinos'])
+                if 'Encapsulamento' in specs and "component_type" in self.dynamic_inputs:
+                    self.dynamic_inputs["component_type"].delete(0, "end")
+                    self.dynamic_inputs["component_type"].insert(0, specs['Encapsulamento'])
 
     def draw_diode_fields(self):
         for widget in self.dynamic_frame.winfo_children():
@@ -1661,21 +1681,41 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self._current_ui_category = category
 
     def delete_current_division(self):
-        gaveta = self.gaveta_cb.get()
-        divisao = self.divisao_cb.get()
-        if "Vazio" in divisao or not gaveta or not divisao:
-            return
-        import tkinter.messagebox as messagebox
-        import database_manager as database
-        if messagebox.askyesno("Confirmar", f"Deseja limpar a {divisao.split('-')[0].strip()} da gaveta {gaveta}?"):
-            try:
-                gaveta_id = int(gaveta)
+        try:
+            gaveta = self.drawer_var.get()
+            divisao = self.slot_var.get()
+            
+            if "Vazio" in divisao or not gaveta or not divisao:
+                return
+            
+            import tkinter.messagebox as messagebox
+            import database_manager as database
+            
+            if messagebox.askyesno("Confirmar", f"Deseja limpar a {divisao.split('-')[0].strip()} da gaveta {gaveta}?"):
+                gaveta_id = gaveta
                 div_num = int(divisao.split(' ')[1])
+                
+                # Clear from database
                 database.clear_division(gaveta_id, div_num)
-                self.refresh_divisions(gaveta)
-                messagebox.showinfo("Sucesso", "Divisão limpa com sucesso!")
-            except Exception as e:
-                messagebox.showerror("Erro", f"Ocorreu um erro: {e}")
+                
+                # Refresh division dropdown list
+                if hasattr(self, 'on_drawer_select'):
+                    self.on_drawer_select(gaveta)
+                
+                # Force the UI to clear the fields visually
+                self.name_entry.delete(0, 'end')
+                self.qty_entry.delete(0, 'end')
+                
+                self.cat_var.set("")
+                for widget in self.dynamic_frame.winfo_children():
+                    widget.destroy()
+                self.dynamic_inputs.clear()
+                    
+                messagebox.showinfo("Sucesso", "Divisão limpa e zerada com sucesso!")
+        
+        except Exception as e:
+            import tkinter.messagebox as messagebox
+            messagebox.showerror("Erro Crítico", f"Falha ao tentar limpar a divisão:\n\n{str(e)}")
 
     def save_component(self):
         name = self.name_entry.get().strip()
@@ -2301,15 +2341,24 @@ class StockAdjustmentModal(ctk.CTkToplevel):
         def adjust_qty(amount, entry_widget):
             try:
                 val = entry_widget.get().strip()
-                current = int(val) if val.lstrip('-').isdigit() else 0
-                new_val = current + amount
-                if new_val < 0:
-                    new_val = 0
+                if not val or val == '+' or val == '-':
+                    current_delta = 0
+                else:
+                    current_delta = int(val)
+                
+                new_delta = current_delta + amount
+                
+                # Prevent withdrawing more than what exists in stock
+                if self.current_qty + new_delta < 0:
+                    new_delta = -self.current_qty
+                    
                 entry_widget.delete(0, 'end')
-                entry_widget.insert(0, str(new_val))
-            except Exception as e:
-                import tkinter.messagebox as messagebox
-                messagebox.showerror("Erro Botão", f"Falha ao ajustar: {str(e)}")
+                if new_delta > 0:
+                    entry_widget.insert(0, f"+{new_delta}")
+                else:
+                    entry_widget.insert(0, str(new_delta))
+            except Exception:
+                pass
                 
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(pady=15)
@@ -2323,6 +2372,7 @@ class StockAdjustmentModal(ctk.CTkToplevel):
         btn_minus.grid(row=0, column=2, padx=2)
         
         self.qty_entry = ctk.CTkEntry(frame, width=60, justify="center")
+        self.qty_entry.delete(0, 'end')
         self.qty_entry.insert(0, "0")
         self.qty_entry.grid(row=0, column=3, padx=5)
         
@@ -2347,14 +2397,18 @@ class StockAdjustmentModal(ctk.CTkToplevel):
     def save(self):
         try:
             val = self.qty_entry.get().strip()
-            new_qty = int(val) if val.lstrip('-').isdigit() else 0
+            if not val or val == '+' or val == '-':
+                delta = 0
+            else:
+                delta = int(val)
+            
+            final_qty = self.current_qty + delta
             
             # Fetch row data directly from Treeview to ensure accurate variables
             if hasattr(self, 'tree') and self.tree and self.tree.selection():
                 selected_item = self.tree.selection()[0]
                 item_values = self.tree.item(selected_item, 'values')
                 
-                # Assuming Location is the 8th column based on typical display order, usually item_values[-1]
                 loc_string = str(item_values[-1])
                 if "-" in loc_string:
                     gaveta_id = int(loc_string.split("-")[0])
@@ -2365,22 +2419,21 @@ class StockAdjustmentModal(ctk.CTkToplevel):
             else:
                 return
 
-            if new_qty <= 0:
+            if final_qty <= 0:
                 import tkinter.messagebox as messagebox
                 import database_manager as database
-                if messagebox.askyesno("Limpar Divisão", "A quantidade chegou a 0. Deseja limpar a divisão atual?"):
+                if messagebox.askyesno("Limpar Divisão", "O estoque chegará a 0. Deseja limpar a divisão atual?"):
                     database.clear_division(gaveta_id, div_num)
                     self.destroy()
                     if self.callback:
                         self.callback()
                     return
                 else:
-                    new_qty = 0
                     self.qty_entry.delete(0, 'end')
                     self.qty_entry.insert(0, "0")
-                    return # User declined, keep window open at 0
+                    return
 
-            LocalDatabaseManager.execute_query("UPDATE components SET quantity = ? WHERE id = ?", (new_qty, self.comp_id))
+            LocalDatabaseManager.execute_query("UPDATE components SET quantity = ? WHERE id = ?", (final_qty, self.comp_id))
             self.destroy()
             if self.callback:
                 self.callback()
@@ -2580,6 +2633,9 @@ class ReleaseNotesModal(ctk.CTkToplevel):
         self.title("Novidades da Versão")
         self.geometry("600x450")
         self.grab_set()
+        
+        self.after(150, self.lift)
+        self.after(150, self.focus_force)
 
         lbl_title = ctk.CTkLabel(self, text="O que há de novo?", font=ctk.CTkFont(size=24, weight="bold"))
         lbl_title.pack(pady=(20, 10))
@@ -2690,7 +2746,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         # Configure window
-        self.title("Inventário de Componentes v1.1.0")
+        self.title("Inventário de Componentes v1.1.1")
         self.geometry("1400x800")
 
         ctk.set_appearance_mode("dark")
@@ -2703,7 +2759,7 @@ class App(ctk.CTk):
 
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(8, weight=1)
+        self.sidebar.grid_rowconfigure(9, weight=1)
 
         self.logo_label = ctk.CTkLabel(
             self.sidebar, text="Inventário", font=ctk.CTkFont(size=24, weight="bold")
@@ -2758,10 +2814,21 @@ class App(ctk.CTk):
             hover_color="#008000"
         )
         self.btn_changelog.grid(row=7, column=0, padx=20, pady=(10, 30), sticky="s")
+        
+        self.btn_packs = ctk.CTkButton(
+            self.sidebar, text="Gerenciar Packs", command=self.show_pack_manager
+        )
+        self.btn_packs.grid(row=8, column=0, padx=20, pady=10)
+        
+        self.credits_btn = ctk.CTkButton(
+            self.sidebar, text="Sobre / Créditos", command=self.open_credits, fg_color="transparent", border_width=1, text_color=("gray10", "#DCE4EE")
+        )
+        self.credits_btn.grid(row=10, column=0, padx=20, pady=(20, 20), sticky="s")
 
         self.drawer_frame = DrawerRegistrationFrame(self)
         self.comp_frame = ComponentRegistrationFrame(self)
         self.search_frame = SearchFrame(self)
+        self.pack_manager_frame = PackManagerFrame(self)
 
         self.active_frame = None
         self.show_drawer_frame()
@@ -2772,7 +2839,7 @@ class App(ctk.CTk):
 
     def check_changelog(self):
         settings_path = "settings.json"
-        current_version = "1.1.0"
+        current_version = "1.1.1"
         last_seen = "1.0.0"
         
         if os.path.exists(settings_path):
@@ -2829,6 +2896,48 @@ class App(ctk.CTk):
         self.search_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         self.search_frame.perform_search()
         self.active_frame = self.search_frame
+        
+    def show_pack_manager(self):
+        self._hide_all_frames()
+        self.pack_manager_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.active_frame = self.pack_manager_frame
+
+    def open_credits(self):
+        credits_win = ctk.CTkToplevel(self)
+        credits_win.title("Sobre o Sistema")
+        credits_win.geometry("350x350")
+        credits_win.resizable(False, False)
+        
+        credits_win.after(150, credits_win.lift)
+        credits_win.after(150, credits_win.focus_force)
+        
+        try:
+            import os
+            import sys
+            def resource_path(relative_path):
+                try:
+                    base_path = sys._MEIPASS
+                except Exception:
+                    base_path = os.path.abspath(".")
+                return os.path.join(base_path, relative_path)
+                
+            from PIL import Image
+            my_image = ctk.CTkImage(light_image=Image.open(resource_path("perfil.png")),
+                                    dark_image=Image.open(resource_path("perfil.png")),
+                                    size=(100, 100))
+            image_label = ctk.CTkLabel(credits_win, image=my_image, text="")
+            image_label.pack(pady=(20, 10))
+        except Exception:
+            pass
+        
+        title_lbl = ctk.CTkLabel(credits_win, text="Component Inventory App", font=("Segoe UI", 18, "bold"))
+        title_lbl.pack(pady=(10, 10))
+        
+        dev_lbl = ctk.CTkLabel(credits_win, text="Desenvolvedor: Gabriel Silverio de Oliveira", font=("Segoe UI", 14))
+        dev_lbl.pack(pady=5)
+        
+        ver_lbl = ctk.CTkLabel(credits_win, text="Versão: 1.1.1", font=("Segoe UI", 12, "italic"))
+        ver_lbl.pack(pady=10)
 
 
 if __name__ == "__main__":

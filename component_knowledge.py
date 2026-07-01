@@ -1,4 +1,39 @@
 import re
+import json
+import os
+
+KNOWLEDGE_FILE = 'custom_knowledge.json'
+
+def get_custom_specs(part_number):
+    if not os.path.exists(KNOWLEDGE_FILE):
+        return None
+    try:
+        with open(KNOWLEDGE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get(part_number.lower().strip())
+    except Exception:
+        return None
+
+def merge_custom_knowledge(new_pack_data):
+    if os.path.exists(KNOWLEDGE_FILE):
+        try:
+            with open(KNOWLEDGE_FILE, 'r', encoding='utf-8') as f:
+                local_data = json.load(f)
+        except Exception:
+            local_data = {}
+    else:
+        local_data = {}
+    
+    # Smart merge logic: prevents duplicates, updates existing
+    for part, specs in new_pack_data.items():
+        part_key = part.lower().strip()
+        if part_key in local_data:
+            local_data[part_key].update(specs)
+        else:
+            local_data[part_key] = specs
+            
+    with open(KNOWLEDGE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(local_data, f, indent=4, ensure_ascii=False)
 
 def get_led_specs(color: str):
     """
@@ -25,6 +60,10 @@ def get_semiconductor_specs(part_number: str):
     if not part_number:
         return None
 
+    custom = get_custom_specs(part_number)
+    if custom:
+        return custom
+
     pn_lower = part_number.lower().strip()
     
     specs = {
@@ -50,6 +89,10 @@ def get_relay_specs(part_number: str):
     if not part_number:
         return None
 
+    custom = get_custom_specs(part_number)
+    if custom:
+        return custom
+
     pn_lower = part_number.lower().strip()
     
     specs = {
@@ -68,6 +111,10 @@ def get_relay_specs(part_number: str):
 def get_transistor_specs(part_number: str):
     if not part_number:
         return None
+
+    custom = get_custom_specs(part_number)
+    if custom:
+        return custom
 
     pn_lower = part_number.lower().strip()
     
@@ -88,6 +135,10 @@ def get_transistor_specs(part_number: str):
 def get_sensor_specs(part_number: str):
     if not part_number:
         return None
+
+    custom = get_custom_specs(part_number)
+    if custom:
+        return custom
 
     pn_lower = part_number.lower().strip()
     
@@ -110,6 +161,10 @@ def get_sensor_specs(part_number: str):
 def get_module_specs(part_number):
     if not part_number:
         return None
+
+    custom = get_custom_specs(part_number)
+    if custom:
+        return custom
 
     pn_lower = part_number.lower().strip()
     

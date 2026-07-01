@@ -484,3 +484,56 @@ class PTHResistorReverseParser:
             
             return [PTHResistorReverseParser.DIGITS_REV[d1], PTHResistorReverseParser.DIGITS_REV[d2], m_color, tol_color]
 
+
+class PackManagerFrame(ctk.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self.grid_columnconfigure(0, weight=1)
+        
+        title = ctk.CTkLabel(self, text="Lojinha de Packs de Conhecimento", font=("Segoe UI", 24, "bold"))
+        title.grid(row=0, column=0, pady=20, padx=20, sticky="w")
+        
+        # Future: This list will be fetched via requests.get() from GitHub
+        packs = [
+            {"id": "pack_inversores", "nome": "Inversores de Potência (IGBTs, Gate Drives)", "autor": "Oficial (Gabriel S.)"},
+            {"id": "pack_arduino", "nome": "Automação Arduino Básica", "autor": "Comunidade"}
+        ]
+        
+        for i, p in enumerate(packs):
+            frame = ctk.CTkFrame(self)
+            frame.grid(row=i+1, column=0, padx=20, pady=10, sticky="ew")
+            
+            lbl = ctk.CTkLabel(frame, text=f"{p['nome']}\nAutor: {p['autor']}", font=("Segoe UI", 16), justify="left")
+            lbl.pack(side="left", padx=15, pady=15)
+            
+            btn = ctk.CTkButton(frame, text="Baixar / Mesclar", command=lambda pack_id=p['id']: self.download_pack(pack_id))
+            btn.pack(side="right", padx=15, pady=15)
+            
+    def download_pack(self, pack_id):
+        import tkinter.messagebox as messagebox
+        import component_knowledge
+        
+        # MOCK DATA for testing before GitHub integration
+        mock_data = {}
+        mock_data = {
+            "fgh40n60": {
+                "Categoria": "Transistor",
+                "Tipo": "IGBT",
+                "Encapsulamento": "TO-247",
+                "Tensão Máx (VCEO/VDS)": "600",
+                "Corrente Máx (IC/ID)": "40"
+            },
+            "ir2110": {
+                "Categoria": "CI (Circuito Integrado)",
+                "Função/Modelo": "Gate Driver High/Low Side",
+                "Número de Pinos": "14",
+                "Encapsulamento": "DIP-14"
+            }
+        }
+            
+        if mock_data:
+            component_knowledge.merge_custom_knowledge(mock_data)
+            messagebox.showinfo("Sucesso", f"Pacote '{pack_id}' integrado com sucesso!\nComponentes mesclados sem duplicatas.")
+        else:
+            messagebox.showwarning("Aviso", "Pacote vazio ou ainda não implementado.")
+
