@@ -939,8 +939,10 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self, text="Salvar Componente", command=self.save_component, height=40
         )
         self.submit_btn.grid(
-            row=2, column=0, columnspan=2, pady=20, padx=20, sticky="w"
+            row=2, column=0, pady=20, padx=20, sticky="w"
         )
+        self.delete_button = ctk.CTkButton(self, text="Limpar Divisão", fg_color="#d32f2f", hover_color="#b71c1c", command=self.delete_current_division, height=40)
+        self.delete_button.grid(row=2, column=1, padx=20, pady=20, sticky="w")
 
         self.on_category_change(self.cat_var.get())
 
@@ -1574,11 +1576,20 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.update_sensor_sinal_options(self.sensor_tipo_cb.get())
 
     def update_sensor_sinal_options(self, selected_tipo):
-        industrial_types = ['Indutivo', 'Capacitivo', 'Fotoelétrico']
-        if selected_tipo in industrial_types:
+        if selected_tipo in ['Indutivo', 'Capacitivo', 'Fotoelétrico']:
             options = ['NPN', 'PNP', 'Outro']
+        elif selected_tipo == 'Temp/Umidade':
+            options = ['One-Wire', 'I2C', 'SPI', 'Analógico', 'Outro']
+        elif selected_tipo == 'Distância/Ultrassom':
+            options = ['Digital (Pulse)', 'I2C', 'UART', 'Analógico', 'Outro']
+        elif selected_tipo == 'Presença/PIR':
+            options = ['Digital (High/Low)', 'Outro']
+        elif selected_tipo == 'Acelerômetro/Giro':
+            options = ['I2C', 'SPI', 'Analógico', 'Outro']
+        elif selected_tipo == 'Tensão/Corrente':
+            options = ['Analógico', 'I2C', 'Outro']
         else:
-            options = ['NPN', 'PNP', 'Analógico', 'I2C', 'SPI', 'UART', 'One-Wire', 'Outro']
+            options = ['Digital (High/Low)', 'Analógico', 'I2C', 'SPI', 'UART', 'One-Wire', 'NPN', 'PNP', 'Outro']
         
         if hasattr(self, 'sensor_sinal_cb'):
             self.sensor_sinal_cb.configure(values=options)
@@ -1645,6 +1656,23 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             )
             
         self._current_ui_category = category
+
+    def delete_current_division(self):
+        gaveta = self.gaveta_cb.get()
+        divisao = self.divisao_cb.get()
+        if "Vazio" in divisao or not gaveta or not divisao:
+            return
+        import tkinter.messagebox as messagebox
+        import database_manager as database
+        if messagebox.askyesno("Confirmar", f"Deseja limpar a {divisao.split('-')[0].strip()} da gaveta {gaveta}?"):
+            try:
+                gaveta_id = int(gaveta)
+                div_num = int(divisao.split(' ')[1])
+                database.clear_division(gaveta_id, div_num)
+                self.refresh_divisions(gaveta)
+                messagebox.showinfo("Sucesso", "Divisão limpa com sucesso!")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Ocorreu um erro: {e}")
 
     def save_component(self):
         name = self.name_entry.get().strip()
@@ -2270,14 +2298,24 @@ class StockAdjustmentModal(ctk.CTkToplevel):
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(pady=15)
         
+        btn_minus_100 = ctk.CTkButton(frame, text="-100", width=40, command=lambda: self.adjust_var(-100))
+        btn_minus_10 = ctk.CTkButton(frame, text="-10", width=40, command=lambda: self.adjust_var(-10))
         btn_minus = ctk.CTkButton(frame, text="-1", width=40, command=lambda: self.adjust_var(-1))
-        btn_minus.grid(row=0, column=0, padx=5)
+        
+        btn_minus_100.grid(row=0, column=0, padx=2)
+        btn_minus_10.grid(row=0, column=1, padx=2)
+        btn_minus.grid(row=0, column=2, padx=2)
         
         self.entry = ctk.CTkEntry(frame, textvariable=self.qty_var, width=60, justify="center")
-        self.entry.grid(row=0, column=1, padx=5)
+        self.entry.grid(row=0, column=3, padx=5)
         
         btn_plus = ctk.CTkButton(frame, text="+1", width=40, command=lambda: self.adjust_var(1))
-        btn_plus.grid(row=0, column=2, padx=5)
+        btn_plus_10 = ctk.CTkButton(frame, text="+10", width=40, command=lambda: self.adjust_var(10))
+        btn_plus_100 = ctk.CTkButton(frame, text="+100", width=40, command=lambda: self.adjust_var(100))
+        
+        btn_plus.grid(row=0, column=4, padx=2)
+        btn_plus_10.grid(row=0, column=5, padx=2)
+        btn_plus_100.grid(row=0, column=6, padx=2)
         
         btn_confirm = ctk.CTkButton(self, text="Confirmar Ajuste", command=self.save)
         btn_confirm.pack(pady=10)
@@ -2285,23 +2323,34 @@ class StockAdjustmentModal(ctk.CTkToplevel):
     def adjust_var(self, amount):
         try:
             val = int(self.qty_var.get())
-        except:
+        except ValueError:
             val = 0
-        self.qty_var.set(str(val + amount))
+        self.qty_var.set(str(max(0, val + amount)))
         
     def save(self):
         try:
             adj = int(self.qty_var.get())
-        except:
+        except ValueError:
             messagebox.showerror("Erro", "Quantidade inválida.")
-            return
-            
-        if adj == 0:
-            self.destroy()
             return
             
         new_qty = max(0, self.current_qty + adj)
         
+        if new_qty <= 0:
+            import tkinter.messagebox as messagebox
+            import database_manager as database
+            comp_data = LocalDatabaseManager.get_component(self.comp_id)
+            if comp_data:
+                row = LocalDatabaseManager.fetch_one("SELECT s.drawer_code, s.subdivision_index FROM components c JOIN subdivisions s ON c.subdivision_id = s.id WHERE c.id = ?", (self.comp_id,))
+                if row:
+                    item_gaveta_id, item_div_num = row[0], row[1]
+                    if messagebox.askyesno("Limpar Divisão", "A quantidade chegou a 0. Deseja limpar a divisão atual?"):
+                        database.clear_division(item_gaveta_id, item_div_num)
+                        self.callback()
+                        self.destroy()
+                        return
+            new_qty = 0
+            
         LocalDatabaseManager.execute_query("UPDATE components SET quantity = ? WHERE id = ?", (new_qty, self.comp_id))
         
         self.callback()
