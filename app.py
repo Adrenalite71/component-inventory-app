@@ -1036,12 +1036,18 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     self.relay_contato_cb.set('SPDT (1 Reversível)')
                     self.relay_bobina_entry.delete(0, "end")
                     self.relay_corrente_entry.delete(0, "end")
-            elif cat == "Sensor / Módulo":
+            elif cat == "Sensor":
                 if hasattr(self, "sensor_tensao_entry"):
                     self.sensor_tipo_cb.set('Temp/Umidade')
                     self.sensor_sinal_cb.set('Digital (High/Low)')
                     self.sensor_tensao_entry.delete(0, "end")
                     self.sensor_corrente_entry.delete(0, "end")
+            elif cat == "Módulo":
+                if hasattr(self, "mod_tensao_entry"):
+                    self.mod_tipo_cb.set('Driver de Motor')
+                    self.mod_ci_entry.delete(0, "end")
+                    self.mod_tensao_entry.delete(0, "end")
+                    self.mod_funcao_entry.delete(0, "end")
                     
             return
             
@@ -1229,13 +1235,21 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 self.relay_bobina_entry.insert(0, str(properties.get('Tensão da Bobina (V)', '')))
                 self.relay_corrente_entry.delete(0, "end")
                 self.relay_corrente_entry.insert(0, str(properties.get('Corrente Máx dos Contatos (A)', '')))
-            elif comp[2] == "Sensor / Módulo":
+            elif comp[2] == "Sensor":
                 if 'Tipo' in properties: self.sensor_tipo_cb.set(properties['Tipo'])
                 if 'Sinal de Interface' in properties: self.sensor_sinal_cb.set(properties['Sinal de Interface'])
                 self.sensor_tensao_entry.delete(0, "end")
                 self.sensor_tensao_entry.insert(0, str(properties.get('Tensão de Operação (V)', '')))
                 self.sensor_corrente_entry.delete(0, "end")
                 self.sensor_corrente_entry.insert(0, str(properties.get('Corrente Máx (mA)', '')))
+            elif comp[2] == "Módulo":
+                if 'Tipo de Módulo' in properties: self.mod_tipo_cb.set(properties['Tipo de Módulo'])
+                self.mod_ci_entry.delete(0, "end")
+                self.mod_ci_entry.insert(0, str(properties.get('CI Principal', '')))
+                self.mod_tensao_entry.delete(0, "end")
+                self.mod_tensao_entry.insert(0, str(properties.get('Tensão de Alim. (V)', '')))
+                self.mod_funcao_entry.delete(0, "end")
+                self.mod_funcao_entry.insert(0, str(properties.get('Função/Aplicação', '')))
             else:
                 set_val("raw_value", c_raw)
                 set_val("voltage", c_volt)
@@ -1275,8 +1289,10 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             if len(self.bridge_tensao_entry.get().strip()) > 0: return
         elif cat == "Relé" and hasattr(self, "relay_bobina_entry"):
             if len(self.relay_bobina_entry.get().strip()) > 0: return
-        elif cat == "Sensor / Módulo" and hasattr(self, "sensor_tensao_entry"):
+        elif cat == "Sensor" and hasattr(self, "sensor_tensao_entry"):
             if len(self.sensor_tensao_entry.get().strip()) > 0: return
+        elif cat == "Módulo" and hasattr(self, "mod_tensao_entry"):
+            if len(self.mod_tensao_entry.get().strip()) > 0: return
             
         self.auto_fill_specs(event)
         
@@ -1312,7 +1328,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     if 'Corrente Máx dos Contatos (A)' in learned:
                         self.relay_corrente_entry.delete(0, "end")
                         self.relay_corrente_entry.insert(0, learned['Corrente Máx dos Contatos (A)'])
-                elif cat == "Sensor / Módulo":
+                elif cat == "Sensor":
                     if 'Tipo' in learned: self.sensor_tipo_cb.set(learned['Tipo'])
                     if 'Sinal de Interface' in learned: self.sensor_sinal_cb.set(learned['Sinal de Interface'])
                     if 'Tensão de Operação (V)' in learned:
@@ -1321,6 +1337,17 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                     if 'Corrente Máx (mA)' in learned:
                         self.sensor_corrente_entry.delete(0, "end")
                         self.sensor_corrente_entry.insert(0, learned['Corrente Máx (mA)'])
+                elif cat == "Módulo":
+                    if 'Tipo de Módulo' in learned: self.mod_tipo_cb.set(learned['Tipo de Módulo'])
+                    if 'CI Principal' in learned:
+                        self.mod_ci_entry.delete(0, "end")
+                        self.mod_ci_entry.insert(0, learned['CI Principal'])
+                    if 'Tensão de Alim. (V)' in learned:
+                        self.mod_tensao_entry.delete(0, "end")
+                        self.mod_tensao_entry.insert(0, learned['Tensão de Alim. (V)'])
+                    if 'Função/Aplicação' in learned:
+                        self.mod_funcao_entry.delete(0, "end")
+                        self.mod_funcao_entry.insert(0, learned['Função/Aplicação'])
                 else:
                     for k, v in learned.items():
                         if k in self.dynamic_inputs:
@@ -1372,7 +1399,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 if 'Corrente Máx dos Contatos (A)' in specs:
                     self.relay_corrente_entry.delete(0, "end")
                     self.relay_corrente_entry.insert(0, specs['Corrente Máx dos Contatos (A)'])
-        elif cat == "Sensor / Módulo":
+        elif cat == "Sensor":
             from component_knowledge import get_sensor_specs
             specs = get_sensor_specs(name)
             if specs:
@@ -1386,6 +1413,21 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 if 'Corrente Máx (mA)' in specs:
                     self.sensor_corrente_entry.delete(0, "end")
                     self.sensor_corrente_entry.insert(0, specs['Corrente Máx (mA)'])
+        elif cat == "Módulo":
+            from component_knowledge import get_module_specs
+            specs = get_module_specs(name)
+            if specs:
+                if 'Tipo de Módulo' in specs:
+                    self.mod_tipo_cb.set(specs['Tipo de Módulo'])
+                if 'CI Principal' in specs:
+                    self.mod_ci_entry.delete(0, "end")
+                    self.mod_ci_entry.insert(0, specs['CI Principal'])
+                if 'Tensão de Alim. (V)' in specs:
+                    self.mod_tensao_entry.delete(0, "end")
+                    self.mod_tensao_entry.insert(0, specs['Tensão de Alim. (V)'])
+                if 'Função/Aplicação' in specs:
+                    self.mod_funcao_entry.delete(0, "end")
+                    self.mod_funcao_entry.insert(0, specs['Função/Aplicação'])
         elif cat == "Transistor":
             from component_knowledge import get_transistor_specs
             specs = get_transistor_specs(name)
@@ -1493,12 +1535,12 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         self.dynamic_inputs = {}
         
         ctk.CTkLabel(self.dynamic_frame, text="Tipo:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.sensor_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Temp/Umidade', 'Distância/Ultrassom', 'Presença/PIR', 'Acelerômetro/Giro', 'Tensão/Corrente', 'Driver/Motor', 'Indutivo', 'Capacitivo', 'Fotoelétrico', 'Outro'])
+        self.sensor_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Temp/Umidade', 'Distância/Ultrassom', 'Presença/PIR', 'Acelerômetro/Giro', 'Tensão/Corrente', 'Indutivo', 'Capacitivo', 'Fotoelétrico', 'Outro'])
         self.sensor_tipo_cb.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         self.sensor_tipo_cb.set('Temp/Umidade')
 
         ctk.CTkLabel(self.dynamic_frame, text="Sinal de Interface:").grid(row=0, column=2, padx=5, pady=5, sticky="e")
-        self.sensor_sinal_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Digital (High/Low)', 'Analógico', 'I2C', 'SPI', 'UART/Serial', 'PWM', 'One-Wire', 'Outro'])
+        self.sensor_sinal_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Digital (High/Low)', 'Analógico', 'I2C', 'SPI', 'UART', 'One-Wire', 'NPN (NA)', 'NPN (NF)', 'PNP (NA)', 'PNP (NF)', 'Outro'])
         self.sensor_sinal_cb.grid(row=0, column=3, padx=5, pady=5, sticky="w")
         self.sensor_sinal_cb.set('Digital (High/Low)')
 
@@ -1509,6 +1551,29 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.dynamic_frame, text="Corrente Máx (mA):").grid(row=1, column=2, padx=5, pady=5, sticky="e")
         self.sensor_corrente_entry = ctk.CTkEntry(self.dynamic_frame)
         self.sensor_corrente_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+
+    def draw_module_fields(self):
+        for widget in self.dynamic_frame.winfo_children():
+            widget.destroy()
+        
+        self.dynamic_inputs = {}
+        
+        ctk.CTkLabel(self.dynamic_frame, text="Tipo de Módulo:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.mod_tipo_cb = ctk.CTkComboBox(self.dynamic_frame, values=['Driver de Motor', 'Relé/Comutação', 'Comunicação (RF/WiFi)', 'Conversor DC-DC', 'Display', 'Áudio', 'Outro'])
+        self.mod_tipo_cb.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.mod_tipo_cb.set('Driver de Motor')
+
+        ctk.CTkLabel(self.dynamic_frame, text="CI Principal:").grid(row=0, column=2, padx=5, pady=5, sticky="e")
+        self.mod_ci_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.mod_ci_entry.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+
+        ctk.CTkLabel(self.dynamic_frame, text="Tensão de Alim. (V):").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.mod_tensao_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.mod_tensao_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ctk.CTkLabel(self.dynamic_frame, text="Função/Aplicação:").grid(row=1, column=2, padx=5, pady=5, sticky="e")
+        self.mod_funcao_entry = ctk.CTkEntry(self.dynamic_frame)
+        self.mod_funcao_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
 
     def on_category_change(self, category):
         if hasattr(self, '_current_ui_category') and self._current_ui_category == category:
@@ -1523,8 +1588,10 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             self.draw_bridge_fields()
         elif category == "Relé":
             self.draw_relay_fields()
-        elif category == "Sensor / Módulo":
+        elif category == "Sensor":
             self.draw_sensor_fields()
+        elif category == "Módulo":
+            self.draw_module_fields()
         else:
             cat_config = getattr(self, "cat_logic_map", {}).get(
                 category, {"logic_type": "Outros", "fields": "[]"}
@@ -1582,7 +1649,7 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
             }
             logic_type = "Ponte Retificadora"
             normalized_val = None
-        elif category == "Sensor / Módulo":
+        elif category == "Sensor":
             raw_val = ""
             voltage = ""
             tolerance = ""
@@ -1593,7 +1660,20 @@ class ComponentRegistrationFrame(ctk.CTkFrame):
                 "Tensão de Operação (V)": self.sensor_tensao_entry.get().strip(),
                 "Corrente Máx (mA)": self.sensor_corrente_entry.get().strip()
             }
-            logic_type = "Sensor / Módulo"
+            logic_type = "Sensor"
+            normalized_val = None
+        elif category == "Módulo":
+            raw_val = ""
+            voltage = ""
+            tolerance = ""
+            comp_type = ""
+            properties = {
+                "Tipo de Módulo": self.mod_tipo_cb.get(),
+                "CI Principal": self.mod_ci_entry.get().strip(),
+                "Tensão de Alim. (V)": self.mod_tensao_entry.get().strip(),
+                "Função/Aplicação": self.mod_funcao_entry.get().strip()
+            }
+            logic_type = "Módulo"
             normalized_val = None
         elif category == "Relé":
             raw_val = ""
@@ -2075,7 +2155,7 @@ class SearchFrame(ctk.CTkFrame):
                                 if v_contatos != '-': tolerance = v_contatos
                                 if v_tipo != '-': comp_type = v_tipo
                                 if v_contato != '-': raw_val = v_contato
-                            elif cat == "Sensor / Módulo":
+                            elif cat == "Sensor":
                                 v_tensao = props.get('Tensão de Operação (V)', '-')
                                 v_corrente = props.get('Corrente Máx (mA)', '-')
                                 v_sinal = props.get('Sinal de Interface', '-')
@@ -2084,6 +2164,15 @@ class SearchFrame(ctk.CTkFrame):
                                 if v_corrente != '-': tolerance = v_corrente
                                 if v_sinal != '-': comp_type = v_sinal
                                 if v_tipo != '-': raw_val = v_tipo
+                            elif cat == "Módulo":
+                                v_tensao = props.get('Tensão de Alim. (V)', '-')
+                                v_ci = props.get('CI Principal', '-')
+                                v_tipo = props.get('Tipo de Módulo', '-')
+                                v_funcao = props.get('Função/Aplicação', '-')
+                                if v_tensao != '-': voltage = v_tensao
+                                if v_ci != '-': tolerance = v_ci
+                                if v_tipo != '-': comp_type = v_tipo
+                                if v_funcao != '-': raw_val = v_funcao
 
                         active_cols = self.tree["columns"]
                         row_values = []
